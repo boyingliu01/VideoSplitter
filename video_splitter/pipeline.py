@@ -34,7 +34,7 @@ class Pipeline:
         base = Path(video_path).stem
         transcript_path = str(Path(video_path).with_suffix(".transcript.json"))
         chapters_path = str(Path(video_path).with_suffix(".chapters.json"))
-        output_dir = str(Path(video_path).with_suffix("_segments"))
+        output_dir = str(Path(video_path).parent / (base + "_segments"))
         srt_path = str(Path(video_path).with_suffix(".zh.srt"))
 
         result = {
