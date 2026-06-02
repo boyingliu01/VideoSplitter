@@ -11,7 +11,7 @@ tqdm>=4.62.0   # For progress bars
 # Development dependencies (optional)
 pytest>=7.0.0  # For testing
 
-# video-splitter dependencies
+# video_splitter dependencies
 faster-whisper>=1.0.0
 json-repair>=0.30.0
 pydantic>=2.0.0

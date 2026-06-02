@@ -1,4 +1,4 @@
-"""Configuration management for video-splitter."""
+"""Configuration management for video_splitter."""
 
 from __future__ import annotations
 

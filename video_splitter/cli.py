@@ -1,4 +1,4 @@
-"""CLI entry point for video-splitter."""
+"""CLI entry point for video_splitter."""
 from __future__ import annotations
 import argparse
 import logging
@@ -9,7 +9,7 @@ from .config import SplitConfig
 from .pipeline import Pipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger("video-splitter")
+logger = logging.getLogger("video_splitter")
 
 
 def cmd_split(args):
@@ -87,7 +87,7 @@ def cmd_check(args):
     import subprocess
     import time
 
-    print("=== video-splitter check ===")
+    print("=== video_splitter check ===")
     issues = []
 
     # Check FFmpeg
