@@ -1,0 +1,23 @@
+{
+  "skill_name": "ffmpeg-video",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Convert test video to WebM with VP9+Opus",
+      "expected_output": "A valid WebM file with VP9 video and Opus audio codecs",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Resize test video to 720p maintaining aspect ratio",
+      "expected_output": "A video file resized to ~1280x720 (or fit within that with aspect ratio preserved)",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Get video info as JSON using get_video_info",
+      "expected_output": "A JSON file containing duration, width, height, fps, codec etc.",
+      "files": []
+    }
+  ]
+}

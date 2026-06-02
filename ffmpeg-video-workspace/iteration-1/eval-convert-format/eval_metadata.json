@@ -1,0 +1,23 @@
+{
+  "eval_id": 0,
+  "eval_name": "convert-format",
+  "prompt": "Convert the video E:\\Private\\skill开发\\ffmpeg-video-workspace\\test-files\\test_input.mp4 to WebM format, saving it as E:\\Private\\skill开发\\ffmpeg-video-workspace\\iteration-1\\eval-convert-format\\with_skill\\outputs\\output.webm. Use the FFmpeg Python wrapper from E:\\Private\\skill开发\\ffmpeg-skill\\ (the package is named 'ffmpeg-skill' and you need to import it via importlib: import importlib, sys; sys.path.insert(0, r'E:\\Private\\skill开发'); mod = importlib.import_module('ffmpeg-skill'); FFmpegSkill = mod.FFmpegSkill). Use VP9 video codec and Opus audio codec.",
+  "assertions": [
+    {
+      "name": "output-webm-exists",
+      "description": "Output WebM file exists and has size > 0 bytes"
+    },
+    {
+      "name": "output-webm-valid",
+      "description": "Output is a valid WebM file (ffprobe can read it)"
+    },
+    {
+      "name": "output-has-vp9-video",
+      "description": "Video stream is encoded with VP9 codec (libvpx-vp9)"
+    },
+    {
+      "name": "output-has-opus-audio",
+      "description": "Audio stream is encoded with Opus codec (libopus)"
+    }
+  ]
+}

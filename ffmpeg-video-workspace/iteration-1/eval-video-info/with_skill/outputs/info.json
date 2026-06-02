@@ -1,0 +1,15 @@
+{
+  "filename": "E:\\Private\\skill\u5f00\u53d1\\ffmpeg-video-workspace\\test-files\\test_input.mp4",
+  "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+  "duration": 5.0,
+  "size": 83219,
+  "bit_rate": 133150,
+  "codec": "h264",
+  "width": 640,
+  "height": 480,
+  "fps": 30.0,
+  "pixel_format": "yuv420p",
+  "audio_codec": "aac",
+  "sample_rate": "44100",
+  "channels": 1
+}

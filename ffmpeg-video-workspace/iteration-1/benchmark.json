@@ -1,0 +1,293 @@
+{
+  "metadata": {
+    "skill_name": "ffmpeg-video",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-06-02T09:02:18Z",
+    "evals_run": [
+      0,
+      1,
+      2
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 110.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "output-webm-exists",
+          "passed": true,
+          "evidence": "File exists: True, size: 94045 bytes"
+        },
+        {
+          "text": "output-webm-valid",
+          "passed": true,
+          "evidence": "ffprobe readable: True"
+        },
+        {
+          "text": "output-has-vp9-video",
+          "passed": true,
+          "evidence": "Video codecs: ['vp9']"
+        },
+        {
+          "text": "output-has-opus-audio",
+          "passed": true,
+          "evidence": "Audio codecs: ['opus']"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 3,
+        "failed": 0,
+        "total": 3,
+        "time_seconds": 12.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "output-mp4-exists",
+          "passed": true,
+          "evidence": "File exists: True, size: 116531 bytes"
+        },
+        {
+          "text": "output-is-valid-video",
+          "passed": true,
+          "evidence": "ffprobe readable: True"
+        },
+        {
+          "text": "output-resolution-is-720p",
+          "passed": true,
+          "evidence": "Resolution: 1280x720"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 36.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "info-json-exists",
+          "passed": true,
+          "evidence": "File exists: True, parseable: True"
+        },
+        {
+          "text": "info-contains-duration",
+          "passed": true,
+          "evidence": "duration=5.0"
+        },
+        {
+          "text": "info-contains-resolution",
+          "passed": true,
+          "evidence": "width=640, height=480"
+        },
+        {
+          "text": "info-contains-codec",
+          "passed": true,
+          "evidence": "codec=h264"
+        },
+        {
+          "text": "info-contains-fps",
+          "passed": true,
+          "evidence": "fps=30.0"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 31.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "output-webm-exists",
+          "passed": true,
+          "evidence": "File exists: True, size: 94045 bytes"
+        },
+        {
+          "text": "output-webm-valid",
+          "passed": true,
+          "evidence": "ffprobe readable: True"
+        },
+        {
+          "text": "output-has-vp9-video",
+          "passed": true,
+          "evidence": "Video codecs: ['vp9']"
+        },
+        {
+          "text": "output-has-opus-audio",
+          "passed": true,
+          "evidence": "Audio codecs: ['opus']"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 3,
+        "failed": 0,
+        "total": 3,
+        "time_seconds": 111.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "output-mp4-exists",
+          "passed": true,
+          "evidence": "File exists: True, size: 116531 bytes"
+        },
+        {
+          "text": "output-is-valid-video",
+          "passed": true,
+          "evidence": "ffprobe readable: True"
+        },
+        {
+          "text": "output-resolution-is-720p",
+          "passed": true,
+          "evidence": "Resolution: 1280x720"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 28.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "info-json-exists",
+          "passed": true,
+          "evidence": "File exists: True, parseable: True"
+        },
+        {
+          "text": "info-contains-duration",
+          "passed": true,
+          "evidence": "duration=5.0"
+        },
+        {
+          "text": "info-contains-resolution",
+          "passed": true,
+          "evidence": "width=640, height=480"
+        },
+        {
+          "text": "info-contains-codec",
+          "passed": true,
+          "evidence": "codec=h264"
+        },
+        {
+          "text": "info-contains-fps",
+          "passed": true,
+          "evidence": "fps=30.0"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 52.6667,
+        "stddev": 51.0816,
+        "min": 12.0,
+        "max": 110.0
+      },
+      "tokens": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 56.6667,
+        "stddev": 47.0779,
+        "min": 28.0,
+        "max": 111.0
+      },
+      "tokens": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.00",
+      "time_seconds": "-4.0",
+      "tokens": "+0"
+    }
+  },
+  "notes": []
+}

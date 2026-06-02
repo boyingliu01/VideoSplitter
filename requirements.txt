@@ -1,0 +1,12 @@
+# FFmpeg Skill Requirements
+# Python 3.8+
+
+# Core dependencies
+# Note: FFmpeg must be installed separately on the system
+
+# Optional dependencies for enhanced functionality
+numpy>=1.21.0  # For advanced video processing
+tqdm>=4.62.0   # For progress bars
+
+# Development dependencies (optional)
+pytest>=7.0.0  # For testing
