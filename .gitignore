@@ -1,2 +1,33 @@
-
+# Sprint worktrees
 .worktrees/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Test/random
+.pytest_cache/
+.ruff_cache/
+.benchmarks/
+.sisyphus/
+.sprint-state/
+.sprint-state
+
+# Env
+.env
+.env.local
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

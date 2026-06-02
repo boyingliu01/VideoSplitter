@@ -7,9 +7,9 @@ sys.path.insert(0, r'E:\Private\skill开发\.worktrees\sprint\sprint-2026-06-02-
 
 
 def _get_modules():
-    chapter_mod = importlib.import_module('video-splitter.analyzer.chapter')
-    config_mod = importlib.import_module('video-splitter.config')
-    return chapter_mod, config_mod
+        chapter_mod = importlib.import_module('video_splitter.analyzer.chapter')
+        config_mod = importlib.import_module('video_splitter.config')
+        return chapter_mod, config_mod
 
 
 class TestTimestampParsing:
