@@ -222,13 +222,22 @@ class ChapterDetector:
             api_key=self.config.llm_api_key,
             base_url=self.config.llm_api_base,
         )
+        system_prompt = (
+            "你是一个专业的视频编辑助手。你的任务是根据视频转录稿分析视频内容，"
+            "划分章节。只输出纯JSON数组，不要输出任何其他文字、解释或markdown格式。JSON格式：[{\"title\":\"标题\",\"start\":\"HH:MM:SS\",\"end\":\"HH:MM:SS\"}]。"
+        )
         response = client.chat.completions.create(
             model=self.config.llm_model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
             temperature=0.3,
             max_tokens=4096,
+            extra_headers={"HTTP-Referer": "https://lab.iwhalecloud.com"},
         )
-        return response.choices[0].message.content.strip()  # type: ignore[union-attr]
+        raw = response.choices[0].message.content.strip()  # type: ignore[union-attr]
+        return raw
 
     def _parse_response(
         self, raw: str, video_duration: float
