@@ -1,0 +1,33 @@
+{
+  "name": "ffmpeg-skill",
+  "version": "1.0.0",
+  "description": "FFmpeg Video Processing Skill - A comprehensive wrapper for FFmpeg operations including format conversion, resolution modification, video cutting, audio extraction, watermarking, merging, and quality adjustment.",
+  "author": "Sisyphus AI",
+  "license": "MIT",
+  "main": "ffmpeg-skill/__init__.py",
+  "scripts": {
+    "install": "pip install -r requirements.txt",
+    "test": "python -m pytest tests/"
+  },
+  "keywords": [
+    "ffmpeg",
+    "video",
+    "audio",
+    "multimedia",
+    "conversion",
+    "processing",
+    "editing"
+  ],
+  "dependencies": {
+    "python": ">=3.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FFmpeg/FFmpeg"
+  },
+  "categories": [
+    "video-processing",
+    "multimedia",
+    "automation"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "duration": 5.0,
+  "width": 640,
+  "height": 480,
+  "fps": 30.0,
+  "codec": "h264",
+  "audio_codec": "aac",
+  "sample_rate": "44100",
+  "channels": 1,
+  "bit_rate": 133150,
+  "size": 83219,
+  "pixel_format": "yuv420p"
+}

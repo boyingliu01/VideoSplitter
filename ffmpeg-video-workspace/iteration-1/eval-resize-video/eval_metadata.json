@@ -1,0 +1,19 @@
+{
+  "eval_id": 1,
+  "eval_name": "resize-video",
+  "prompt": "Resize the video E:\\Private\\skill开发\\ffmpeg-video-workspace\\test-files\\test_input.mp4 to 720p (1280x720) maintaining aspect ratio, saving as E:\\Private\\skill开发\\ffmpeg-video-workspace\\iteration-1\\eval-resize-video\\with_skill\\outputs\\output_720p.mp4. Use the FFmpeg Python wrapper from E:\\Private\\skill开发\\ffmpeg-skill\\ (the package is named 'ffmpeg-skill' and you need to import it via importlib: import importlib, sys; sys.path.insert(0, r'E:\\Private\\skill开发'); mod = importlib.import_module('ffmpeg-skill'); FFmpegSkill = mod.FFmpegSkill). Use the resize_to_preset method with preset='720p'.",
+  "assertions": [
+    {
+      "name": "output-mp4-exists",
+      "description": "Output MP4 file exists and has size > 0 bytes"
+    },
+    {
+      "name": "output-resolution-is-720p",
+      "description": "Output resolution is 1280x720"
+    },
+    {
+      "name": "output-is-valid-video",
+      "description": "Output is a valid video file (ffprobe can read it)"
+    }
+  ]
+}

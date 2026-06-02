@@ -1,0 +1,27 @@
+{
+  "eval_id": 2,
+  "eval_name": "video-info",
+  "prompt": "Get detailed information about the video E:\\Private\\skill开发\\ffmpeg-video-workspace\\test-files\\test_input.mp4 using get_video_info and write the result as JSON to E:\\Private\\skill开发\\ffmpeg-video-workspace\\iteration-1\\eval-video-info\\with_skill\\outputs\\info.json. Use the FFmpeg Python wrapper from E:\\Private\\skill开发\\ffmpeg-skill\\ (the package is named 'ffmpeg-skill' and you need to import it via importlib: import importlib, sys; sys.path.insert(0, r'E:\\Private\\skill开发'); mod = importlib.import_module('ffmpeg-skill'); FFmpegSkill = mod.FFmpegSkill). Format the JSON with indent=2.",
+  "assertions": [
+    {
+      "name": "info-json-exists",
+      "description": "JSON output file exists and is parseable"
+    },
+    {
+      "name": "info-contains-duration",
+      "description": "JSON contains a valid duration field (> 0)"
+    },
+    {
+      "name": "info-contains-resolution",
+      "description": "JSON contains nonzero width and height fields"
+    },
+    {
+      "name": "info-contains-codec",
+      "description": "JSON contains a non-empty codec field"
+    },
+    {
+      "name": "info-contains-fps",
+      "description": "JSON contains a valid fps field (> 0)"
+    }
+  ]
+}

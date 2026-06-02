@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "info-json-exists",
+      "passed": true,
+      "evidence": "File exists: True, parseable: True"
+    },
+    {
+      "text": "info-contains-duration",
+      "passed": true,
+      "evidence": "duration=5.0"
+    },
+    {
+      "text": "info-contains-resolution",
+      "passed": true,
+      "evidence": "width=640, height=480"
+    },
+    {
+      "text": "info-contains-codec",
+      "passed": true,
+      "evidence": "codec=h264"
+    },
+    {
+      "text": "info-contains-fps",
+      "passed": true,
+      "evidence": "fps=30.0"
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 5,
+    "failed": 0,
+    "total": 5
+  },
+  "timing": {
+    "total_duration_seconds": 28.0,
+    "total_tokens": 0,
+    "duration_ms": 28000
+  }
+}

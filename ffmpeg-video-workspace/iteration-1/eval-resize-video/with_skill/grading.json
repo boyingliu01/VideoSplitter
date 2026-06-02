@@ -1,0 +1,19 @@
+{
+  "expectations": [
+    {
+      "text": "output-mp4-exists",
+      "passed": true,
+      "evidence": "File exists: True, size: 116531 bytes"
+    },
+    {
+      "text": "output-is-valid-video",
+      "passed": true,
+      "evidence": "ffprobe readable: True"
+    },
+    {
+      "text": "output-resolution-is-720p",
+      "passed": true,
+      "evidence": "Resolution: 1280x720"
+    }
+  ]
+}

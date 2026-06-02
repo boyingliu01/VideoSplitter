@@ -1,0 +1,24 @@
+{
+  "expectations": [
+    {
+      "text": "output-webm-exists",
+      "passed": true,
+      "evidence": "File exists: True, size: 94045 bytes"
+    },
+    {
+      "text": "output-webm-valid",
+      "passed": true,
+      "evidence": "ffprobe readable: True"
+    },
+    {
+      "text": "output-has-vp9-video",
+      "passed": true,
+      "evidence": "Video codecs: ['vp9']"
+    },
+    {
+      "text": "output-has-opus-audio",
+      "passed": true,
+      "evidence": "Audio codecs: ['opus']"
+    }
+  ]
+}
