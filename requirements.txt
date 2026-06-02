@@ -10,3 +10,11 @@ tqdm>=4.62.0   # For progress bars
 
 # Development dependencies (optional)
 pytest>=7.0.0  # For testing
+
+# video-splitter dependencies
+faster-whisper>=1.0.0
+json-repair>=0.30.0
+pydantic>=2.0.0
+librosa>=0.10.0
+soundfile>=0.12.0
+openai>=1.0.0
