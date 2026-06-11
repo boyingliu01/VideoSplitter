@@ -42,20 +42,29 @@ Before using me, ensure:
    pip install numpy tqdm
    ```
 
-## When to Use Me
+## Triggers
 
 Use this skill when:
-- You need to convert video/audio to different formats
-- You need to resize or scale videos
-- You need to cut/trim video segments
-- You need to extract audio from video files
-- You need to add watermarks to videos
-- You need to merge multiple videos
-- You need to adjust video quality or compression
-- You need to get video metadata information
-- You need to batch process multiple videos
+- converting video/audio to different formats
+- Need to resize or scale videos
+- Need to cut/trim video segments
+- Need to extract audio from video files
+- Need to add watermarks to videos
+- Need to merge multiple videos
+- Need to adjust video quality or compression
+- Need to get video metadata information
+- Need to batch process multiple videos
 
-## How I Work
+## Workflow
+
+The FFmpeg processing pipeline follows these steps:
+
+1. Validate input file existence and FFmpeg availability
+2. Parse and validate parameters (resolution, time formats, codec names)
+3. Construct FFmpeg command with appropriate flags
+4. Execute FFmpeg process and capture stdout/stderr
+5. Parse FFmpeg progress output for real-time tracking
+6. Handle errors and return structured results or error messages
 
 ### Architecture
 
@@ -74,6 +83,18 @@ I provide clear error messages for:
 - Invalid parameters (resolution presets, time formats, etc.)
 - FFmpeg execution failures
 - Permission issues
+
+## Anti-Patterns
+
+| Anti-Pattern | Correct Approach |
+|--------------|------------------|
+| Hardcoding FFmpeg paths without fallback to PATH lookup | Use `shutil.which('ffmpeg')` or subprocess with 'ffmpeg' command |
+| Ignoring FFmpeg exit codes and assuming success | Always check return code; raise error on non-zero exit |
+| Using ultrafast preset for final/archived renders | Use medium or slow preset for best compression-to-quality ratio |
+| Setting CRF below 18 for web streaming (wasteful file size) | Use CRF 20-24 for web; CRF 18-20 only for archiving |
+| Merging videos with mismatched resolution/FPS/codecs | Validate stream compatibility before merge; re-encode to match if needed |
+| Not testing on small segments before batch processing | Always test parameters on a short segment first |
+| Forgetting to maintain aspect ratio on resize | Use `maintain_aspect=True` or proper scale/pad filters |
 
 ## API Reference
 
@@ -472,7 +493,17 @@ except FFmpegError as e:
 
 ## Examples
 
-See `examples.py` for runnable examples demonstrating all features.
+- Convert MP4 to WebM with VP9/Opus codec for web streaming
+- Resize video to 720p preset while maintaining aspect ratio
+- Cut a 30-second segment starting from 10 seconds into the video
+- Extract audio track from video to high-quality MP3 (320kbit/s)
+- Add semi-transparent text watermark to bottom-right corner
+- Merge multiple video parts into a single concatenated file
+- Compress large video with CRF 28 for smaller file size
+- Extract video metadata (duration, resolution, codec, FPS)
+- Batch resize all videos in a directory to 720p
+
+See `examples.py` for runnable code demonstrating all features.
 
 ## Testing
 
@@ -493,6 +524,13 @@ Refer to FFmpeg documentation: https://ffmpeg.org/legal.html
 - [FFmpeg Wiki](https://trac.ffmpeg.org/wiki)
 - [FFmpeg Codecs](https://ffmpeg.org/ffmpeg-codecs.html)
 - [FFmpeg Filters](https://ffmpeg.org/ffmpeg-filters.html)
+
+## Scope
+
+- **IN**: Video format conversion, resolution scaling, segment extraction, audio extraction, watermarking, video merging, quality adjustment, metadata extraction, batch processing
+- **IN**: FFmpeg command generation, parameter validation, error handling, progress tracking
+- **Does NOT**: Edit video frames directly, apply visual effects (color grading, filters beyond scale), perform video analysis (object detection, scene recognition), or stream video to external services
+- **Does NOT**: Provide GUI interfaces, web dashboards, or cloud processing — operates as a local CLI/Python library only
 
 ## Version
 
