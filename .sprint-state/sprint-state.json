@@ -1,11 +1,66 @@
 {
-  "phase": -1,
+  "id": "sprint-2026-07-08-03",
+  "task_description": "字幕识别后交互验证和修改功能：transcribe完成后暂停，让用户在Terminal中确认和修改字幕文本，修改正确后再继续下游任务",
+  "phase": 1,
   "status": "running",
-  "id": "sprint-2026-06-02-01",
+  "started_at": "2026-07-08T13:18:53Z",
   "isolation": {
+    "worktree_path": ".worktrees/sprint/sprint-2026-07-08-03",
+    "branch": "sprint/2026-07-08-03",
     "created_from": "master",
-    "worktree_path": ".worktrees/sprint/sprint-2026-06-02-01",
-    "created_from_commit": "30b470f",
-    "branch": "sprint/2026-06-02-01"
+    "created_from_commit": "c49c2064c766d10491f89203f5867106dce6eb0b"
+  },
+  "phase_history": [
+    {
+      "phase": -1,
+      "phase_name": "ISOLATE",
+      "status": "completed",
+      "started_at": "2026-07-08T13:18:53Z",
+      "completed_at": "2026-07-08T13:20:00Z",
+      "duration_seconds": 67
+    },
+    {
+      "phase": -0.5,
+      "status": "completed",
+      "duration_seconds": 120,
+      "started_at": "2026-07-08T13:20:00Z",
+      "completed_at": "2026-07-08T13:22:00Z",
+      "phase_name": "AUTO-ESTIMATE"
+    },
+    {
+      "phase": -0.5,
+      "phase_name": "AUTO-ESTIMATE",
+      "status": "completed",
+      "started_at": "2026-07-08T13:20:00Z",
+      "completed_at": "2026-07-08T13:22:00Z",
+      "duration_seconds": 120
+    },
+    {
+      "phase": 0,
+      "phase_name": "THINK",
+      "status": "completed",
+      "started_at": "2026-07-08T13:22:00Z",
+      "completed_at": "2026-07-08T13:30:00Z",
+      "duration_seconds": 480
+    },
+    {
+      "phase": 1,
+      "phase_name": "PLAN",
+      "status": "completed",
+      "started_at": "2026-07-08T13:30:00Z",
+      "completed_at": "2026-07-08T13:50:00Z",
+      "duration_seconds": 1200
+    }
+  ],
+  "outputs": {
+    "specification": ".sprint-state/phase-outputs/specification.yaml",
+    "delphi_reviewed": ".sprint-state/delphi-reviewed.json"
+  },
+  "metrics": {},
+  "auto_estimate": {
+    "user_decision": "accepted",
+    "recommended_flow": "Phase 0-4 (Standard)",
+    "estimated_level": "standard",
+    "change_type": "new-feature"
   }
 }

@@ -147,6 +147,17 @@ def cmd_check(args):
         print("\nAll checks passed!")
 
 
+def cmd_review(args):
+    """Interactive transcript review and correction."""
+    from .review import run_review
+    run_review(
+        video_path=args.video,
+        transcript_path=args.transcript,
+        resume=args.resume,
+        no_save=args.no_save,
+    )
+
+
 def cmd_batch(args):
     """Process multiple videos sequentially."""
     import glob
@@ -206,6 +217,13 @@ def main():
 
     p = sub.add_parser("check", help="Check dependencies and estimate performance")
     p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser("review", help="Interactive transcript review and correction")
+    p.add_argument("video", help="Input video path")
+    p.add_argument("--transcript", help="Transcript JSON path (auto-derived if omitted)")
+    p.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
+    p.add_argument("--no-save", action="store_true", help="Dry-run: don't save changes")
+    p.set_defaults(func=cmd_review)
 
     p = sub.add_parser("batch", help="Process all .mp4 files in a directory")
     p.add_argument("dir", help="Directory with .mp4 files")

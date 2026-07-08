@@ -1,139 +1,81 @@
-# Video Splitter — Specification
-# Auto-generated from Delphi Review consensus (Round 2, 3/3 APPROVED)
-# 2026-06-02
+# specification.yaml — Auto-generated from Delphi review consensus
+# Sprint: sprint-2026-07-08-03
+# Date: 2026-07-08
+# Verdict: APPROVED (with 2 critical fixes noted)
 
-spec:
-  name: video-splitter
-  version: 0.1.0
-  language: python
-  delivery: standalone_cli
-  dependencies:
-    hard:
-      - ffmpeg-skill (local, import FFmpegSkill)
-      - faster-whisper (>=1.0.0)
-      - json-repair
-      - pydantic (>=2.0)
-      - librosa
-      - tqdm
-    external:
-      - ffmpeg (PATH)
-      - LLM API (DeepSeek-chat / OpenAI-compatible)
+feature:
+  name: "字幕校对交互功能"
+  description: >
+    在 FunASR 转录完成后，提供终端交互界面让用户逐段检查和修改字幕文本。
+    修改完成后覆盖 transcript.json 并重新生成 SRT。
+  version: "1.0.0"
 
-user_stories:
-  - id: US-001
-    story: 技术人员用一条命令把中文培训视频按主题拆成 ≤15min 短片段
+requirements:
+  - id: REQ-01
+    title: "CLI review 子命令"
+    description: "新增 `python -m video_splitter review <video.mp4>` 子命令"
     acceptance:
-      - AC-001-01: 输入 mp4，执行 `video-splitter split video.mp4`，产出 {name}_segments/ 目录
-      - AC-001-02: 每个输出片段时长 ≤15 分钟，≥1 分钟
-      - AC-001-03: 片段名格式: {原文件名}_{序号}_{中文标题}.mp4
-      - AC-001-04: 标题不含 `/:*?"<>|` 等非法文件名字符
+      - "命令接受 video 参数和 --transcript/--resume/--no-save 可选参数"
+      - "自动定位对应 .transcript.json 文件"
+      - "无 transcript 文件时给出明确错误提示"
 
-  - id: US-002
-    story: LLM 分章失败时降级为等分，用户始终获得可用输出
+  - id: REQ-02
+    title: "终端交互界面"
+    description: "逐段显示字幕，用户可修改文本"
     acceptance:
-      - AC-002-01: LLM API 3 次重试失败后，自动按 15min 等分 + 编号命名
-      - AC-002-02: LLM 返回非法 JSON 时，json-repair 修复后重试
-      - AC-002-03: LLM 返回的 timecode 超出视频时长时，被过滤并提示
-      - AC-002-04: 降级模式下输出文件仍可用，无崩溃
+      - "显示当前进度（N/total）、已修改数"
+      - "显示每段时间码（HH:MM:SS.mmm → HH:MM:SS.mmm）"
+      - "显示原文，接受用户输入"
+      - "Enter 空输入 = 保留原文，:q 保存退出，:p 上一段，:h 帮助，:j N 跳转"
 
-  - id: US-003
-    story: 长视频转录稿自动分块处理，不超 LLM token 限制
+  - id: REQ-03
+    title: "断点续传"
+    description: "支持中断后从上次位置继续校对"
     acceptance:
-      - AC-003-01: transcript ≤60K tokens 时单次 LLM 调用
-      - AC-003-02: transcript >60K tokens 时滑动窗口分块（每窗口 ~15min, 2min 重叠）
-      - AC-003-03: 多窗口结果合并后无重叠/间隙
+      - "每段处理后写入 .review_progress.json"
+      - "再次运行自动读取进度继续"
+      - "进度文件损坏时提示用户并重新开始"
 
-  - id: US-004
-    story: 断点续传——长视频处理中断后可跳过已完成步骤
+  - id: REQ-04
+    title: "数据安全"
+    description: "原子写入，防止数据损坏"
     acceptance:
-      - AC-004-01: `--resume` 检测已有 transcript.json → 跳过 Step 2
-      - AC-004-02: `--resume` 检测已有 chapters.json → 跳过 Step 3
-      - AC-004-03: 失败步骤保留部分产物，用户可手动修复后 `--resume`
+      - "使用 tempfile + os.replace() 原子覆盖 transcript.json"
+      - "用户输入过滤控制字符和 null bytes"
+      - "所有文件操作使用 encoding='utf-8'"
 
-  - id: US-005
-    story: 依赖检查和硬件性能预估
+  - id: REQ-05
+    title: "SRT 重生"
+    description: "校对完成后重新生成 .zh.srt"
     acceptance:
-      - AC-005-01: `video-splitter check` 验证 Python deps、FFmpeg PATH、模型可用性
-      - AC-005-02: 输出 CPU/GPU 模式下预估转录速度
-      - AC-005-03: `--dry-run` 输出 LLM API 预估 token 用量和成本
+      - "调用 to_srt() 重新生成 SRT 文件"
 
-  - id: US-006
-    story: 音频质量预检避免无效处理
+  - id: REQ-06
+    title: "空段过滤"
+    description: "加载时自动过滤空白和零长度段落"
     acceptance:
-      - AC-006-01: 静音比例 >90% → 警告但继续
-      - AC-006-02: 无声频 → fail-fast 并给出明确提示
+      - "text.strip() == '' 的段落自动跳过"
+      - "start == end 的段落自动跳过"
 
-  - id: US-007
-    story: 切割精度控制
-    acceptance:
-      - AC-007-01: `--cut-mode fast`（默认）: stream copy, keyframe 偏移 >0.5s → 自动 precise fallback
-      - AC-007-02: `--cut-mode precise`: re-encode, 帧精确
+files:
+  new:
+    - "video_splitter/review.py"
+    - "video_splitter/tests/test_review.py"
+  modified:
+    - "video_splitter/cli.py"
+  unchanged:
+    - "video_splitter/pipeline.py"
+    - "video_splitter/extractor/transcribe.py"
+    - "video_splitter/extractor/audio.py"
+    - "video_splitter/config.py"
 
-  - id: US-008
-    story: 批量处理多个视频
-    acceptance:
-      - AC-008-01: `video-splitter batch ./videos/` 依次处理每个 mp4
-      - AC-008-02: 处理结束后输出汇总报告（成功/失败数、总耗时）
-
-  - id: US-009
-    story: 转录副产品——从 transcript.json 生成 SRT 字幕
-    acceptance:
-      - AC-009-01: 每次 split 自动生成 .srt 文件
-      - AC-009-02: SRT 文件可被需求二的程序直接导入
-
-architecture:
-  pipeline:
-    - step: 0
-      name: precheck
-      module: extractor.audio
-      description: librosa RMS 音频质量检测
-    - step: 1
-      name: extract
-      module: extractor.audio
-      description: FFmpeg pipe 提取 16kHz mono，超 2h 用 temp file
-    - step: 2
-      name: transcribe
-      module: extractor.transcribe
-      description: faster-whisper 转录，输出 transcript.json
-    - step: 3
-      name: chapter
-      module: analyzer.chapter
-      description: LLM 分章（含 token 预算、chunking、retry、json-repair、fallback）
-    - step: 4
-      name: validate
-      module: analyzer.validator
-      description: 时长约束、边界对齐、命名规则、文件名清洗
-    - step: 5
-      name: cut
-      module: splitter.cutter
-      description: FFmpegSkill.cut() 切割（keyframe-aware, fast/precise 双模式）
-
-  modules:
-    - path: cli.py
-      role: argparse CLI 入口
-    - path: config.py
-      role: 配置管理（模型、API key、阈值、命名模板）
-    - path: pipeline.py
-      role: 编排 Step 0→5，处理 --resume/--dry-run
-    - path: extractor/audio.py
-      role: FFmpeg 音频提取 + librosa 预检
-    - path: extractor/transcribe.py
-      role: faster-whisper 转录 + transcript schema
-    - path: analyzer/chapter.py
-      role: LLM 分章（token预算/chunking/retry/json-repair/fallback）
-    - path: analyzer/validator.py
-      role: 约束检查 + 边界对齐 + 命名
-    - path: splitter/cutter.py
-      role: FFmpegSkill 切割封装
-
-errors:
-  - code: E001
-    description: FFmpeg not found in PATH
-  - code: E002
-    description: Video file does not exist or is corrupt
-  - code: E003
-    description: No detectable speech in audio
-  - code: E004
-    description: LLM API unreachable after 3 retries → fallback to uniform splits
-  - code: E005
-    description: LLM returned unrepairable JSON → fallback to uniform splits
+edge_cases:
+  - "空 transcript（0 segments）"
+  - "单段 transcript"
+  - "非常长的单段文本（终端换行）"
+  - "损坏的 transcript.json"
+  - "进度文件 JSON 解析失败"
+  - "零编辑完成（无任何修改）"
+  - ":p 在第一段时"
+  - ":j N 越界"
+  - "Ctrl+C 中断"
