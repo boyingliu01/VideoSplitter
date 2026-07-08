@@ -12,6 +12,23 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("video_splitter")
 
 
+def _validate_reference_docs(paths):
+    """Validate reference document paths exist and are readable files."""
+    if paths is None:
+        return None
+    validated = []
+    for p in paths:
+        path_obj = Path(p)
+        if not path_obj.exists():
+            print(f"Error: reference document not found: {p}", file=sys.stderr)
+            sys.exit(1)
+        if not path_obj.is_file():
+            print(f"Error: not a file: {p}", file=sys.stderr)
+            sys.exit(1)
+        validated.append(str(path_obj.resolve()))
+    return validated
+
+
 def cmd_split(args):
     config = SplitConfig.from_env()
     config.max_segment_duration = args.max_duration
@@ -21,8 +38,10 @@ def cmd_split(args):
     if args.cut_mode:
         config.cut_mode = args.cut_mode
 
+    reference_docs = _validate_reference_docs(args.reference_docs)
+
     if args.dry_run:
-        pipeline = Pipeline(config)
+        pipeline = Pipeline(config, reference_docs=reference_docs)
         result = pipeline.dry_run(args.video)
         print(f"\n=== Dry Run ===")
         print(f"Video: {args.video}")
@@ -32,7 +51,7 @@ def cmd_split(args):
         print(f"LLM calls: {result.get('llm_calls', '?')}")
         return
 
-    pipeline = Pipeline(config)
+    pipeline = Pipeline(config, reference_docs=reference_docs)
     result = pipeline.run(args.video)
     print(f"\n=== Split Complete ===")
     print(f"Video: {result['video']}")
@@ -51,11 +70,17 @@ def cmd_transcribe(args):
         config.model_size = args.model
     from .extractor.audio import AudioExtractor
     from .extractor.transcribe import transcribe
+    from .extractor.hotwords import extract_hotwords
     import json
+
+    reference_docs = _validate_reference_docs(args.reference_docs)
+    hotwords = None
+    if reference_docs:
+        hotwords = extract_hotwords(reference_docs, max_count=config.hotword_max_count)
 
     audio = AudioExtractor()
     audio_path = audio.extract(args.video)
-    transcript = transcribe(audio_path, config)
+    transcript = transcribe(audio_path, config, hotwords=hotwords)
     out_path = str(Path(args.video).with_suffix(".transcript.json"))
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(transcript, f, ensure_ascii=False, indent=2)
@@ -188,11 +213,17 @@ def main():
     p.add_argument("--cut-mode", choices=["fast", "precise"], help="Cut precision mode")
     p.add_argument("--resume", action="store_true", help="Skip steps with existing intermediate files")
     p.add_argument("--dry-run", action="store_true", help="Estimate cost without LLM call")
+    p.add_argument("--reference-doc", dest="reference_docs", action="append",
+                   default=None, metavar="PATH",
+                   help="Reference document for hotword extraction (can be specified multiple times)")
     p.set_defaults(func=cmd_split)
 
     p = sub.add_parser("transcribe", help="Only transcribe audio to text")
     p.add_argument("video")
     p.add_argument("--model", choices=["paraformer-zh"])
+    p.add_argument("--reference-doc", dest="reference_docs", action="append",
+                   default=None, metavar="PATH",
+                   help="Reference document for hotword extraction (can be specified multiple times)")
     p.set_defaults(func=cmd_transcribe)
 
     p = sub.add_parser("cut", help="Only cut video using existing chapters.json")

@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 from .config import SplitConfig
 from .extractor.audio import AudioExtractor
 from .extractor.transcribe import transcribe, estimate_tokens, to_srt
+from .extractor.hotwords import extract_hotwords
 from .analyzer.chapter import Chapter, ChapterDetector
 from .analyzer.validator import ChapterValidator
 from .splitter.cutter import VideoCutter
@@ -21,8 +22,9 @@ logger = logging.getLogger(__name__)
 class Pipeline:
     """Orchestrates the full video splitting pipeline."""
 
-    def __init__(self, config: Optional[SplitConfig] = None):
+    def __init__(self, config: Optional[SplitConfig] = None, reference_docs: Optional[list[str]] = None):
         self.config = config or SplitConfig.from_env()
+        self.reference_docs = reference_docs
         self.audio = AudioExtractor()
         self.chapter_detector = ChapterDetector(self.config)
         self.validator = ChapterValidator(self.config)
@@ -59,7 +61,31 @@ class Pipeline:
             else:
                 logger.info("Extracting audio and transcribing...")
                 audio_path = self.audio.extract(video_path)
-                transcript = transcribe(audio_path, self.config)
+
+                hotwords = None
+                if self.reference_docs:
+                    logger.info(
+                        "Extracting hotwords from %d reference document(s)...",
+                        len(self.reference_docs),
+                    )
+                    hotwords = extract_hotwords(
+                        self.reference_docs,
+                        max_count=self.config.hotword_max_count,
+                    )
+                    logger.info("Extracted %d hotwords", len(hotwords))
+                else:
+                    logger.warning(
+                        "\u672a\u63d0\u4f9b\u53c2\u8003\u6587\u6863\u3002"
+                        "\u4e3a\u63d0\u5347\u8bed\u97f3\u8bc6\u522b\u51c6\u786e\u6027\uff0c"
+                        "\u60a8\u53ef\u4ee5\u901a\u8fc7 --reference-doc \u53c2\u6570"
+                        "\u63d0\u4f9b\u4e00\u4e2a\u6216\u591a\u4e2a\u53c2\u8003\u6587\u6863"
+                        "\uff08\u5982\u89c4\u7ae0\u5236\u5ea6\u3001\u4e13\u4e1a\u672f\u8bed\u8bf4\u660e\uff09\uff0c"
+                        "\u7a0b\u5e8f\u5c06\u81ea\u52a8\u63d0\u53d6\u5173\u952e\u672f\u8bed\u4f5c\u4e3a hotword\uff0c"
+                        "\u5e2e\u52a9 FunASR \u66f4\u51c6\u786e\u5730\u8bc6\u522b\u4e13\u6709\u540d\u8bcd\u3002"
+                    )
+                    hotwords = None
+
+                transcript = transcribe(audio_path, self.config, hotwords=hotwords)
                 with open(transcript_path, "w", encoding="utf-8") as f:
                     json.dump(transcript, f, ensure_ascii=False, indent=2)
                 logger.info(f"Transcript saved: {transcript_path}")
@@ -116,7 +142,15 @@ class Pipeline:
             return {"status": "error", "message": msg}
 
         audio_path = self.audio.extract(video_path)
-        transcript = transcribe(audio_path, self.config)
+
+        hotwords = None
+        if self.reference_docs:
+            hotwords = extract_hotwords(
+                self.reference_docs,
+                max_count=self.config.hotword_max_count,
+            )
+
+        transcript = transcribe(audio_path, self.config, hotwords=hotwords)
         token_est = estimate_tokens(transcript)
         cost_est = (token_est / 1_000_000) * 0.10
 

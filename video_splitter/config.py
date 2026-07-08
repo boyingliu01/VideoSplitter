@@ -21,6 +21,7 @@ class SplitConfig:
     cut_mode: str = "fast"
     keyframe_tolerance: float = 0.5
     language: str = "zh"
+    hotword_max_count: int = 30
     naming_template: str = "{basename}_{seq:02d}_{title}"
     resume: bool = False
 

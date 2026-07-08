@@ -26,6 +26,7 @@ def transcribe(
     audio_path: str,
     config: SplitConfig,
     progress_callback: Optional[Callable[[float], None]] = None,
+    hotwords: Optional[list[str]] = None,
 ) -> Dict[str, Any]:
     """Transcribe audio using FunASR paraformer-zh with VAD + punctuation.
 
@@ -40,6 +41,8 @@ def transcribe(
         audio_path: Path to 16kHz mono WAV audio file.
         config: SplitConfig instance (uses model_size, device).
         progress_callback: Optional callback receiving a float in [0, 1].
+        hotwords: Optional list of hotword strings for ASR biasing.
+            Passed to model.generate() as a space-separated string.
 
     Returns:
         Dict with keys ``language``, ``duration``, ``segments``.
@@ -73,11 +76,21 @@ def transcribe(
 
     logger.info("Transcribing with FunASR (VAD+punc pipeline)...")
 
-    res = model.generate(
-        input=audio_path,
-        batch_size_s=300,
-        batch_size_threshold_s=60,
-    )
+    gen_kwargs = {
+        "input": audio_path,
+        "batch_size_s": 300,
+        "batch_size_threshold_s": 60,
+    }
+    if hotwords:
+        hotword_str = " ".join(hotwords)
+        gen_kwargs["hotword"] = hotword_str
+        logger.info(
+            "Using %d hotwords for ASR biasing: %s",
+            len(hotwords),
+            hotword_str[:100],
+        )
+
+    res = model.generate(**gen_kwargs)
     result = res[0]
 
     # VAD+punc pipeline: prefer sentence_info with sentence-level timestamps.

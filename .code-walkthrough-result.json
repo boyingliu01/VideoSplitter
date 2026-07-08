@@ -1,61 +1,65 @@
 {
-  "commit": "a0cb0df278250a96705e0a726726cc0b6be05397",
-  "branch": "sprint/2026-07-08-02",
-  "timestamp": "2026-07-08T07:55:00Z",
-  "expires": "2026-07-08T08:55:00Z",
+  "commit": "445708ec80d2f6e61f22432873165e6daa80f29a",
+  "branch": "sprint/2026-07-08-03",
+  "timestamp": "2026-07-08T08:30:00Z",
+  "expires": "2026-07-08T09:30:00Z",
   "verdict": "APPROVED",
   "confidence": 8,
   "experts": [
     {
       "id": "Expert A (Architecture)",
-      "verdict": "APPROVED",
+      "verdict": "APPROVED_WITH_MINOR",
       "confidence": 8,
-      "rationale": "Architecture is sound. Output contract fully preserved. VAD+punc pipeline cleanly integrated. No blocking issues."
+      "model": "deepseek-v4-pro",
+      "rationale": "Clean architectural separation: hotword extraction is an independent module with clear API boundary. Lazy jieba import is correct. Encoding fallback chain handles Chinese content well. No critical or major issues."
     },
     {
       "id": "Expert B (Implementation)",
-      "verdict": "REQUEST_CHANGES",
+      "verdict": "APPROVED_WITH_MINOR",
       "confidence": 8,
-      "rationale": "Requested changes based on chunking code that was actually already removed in this diff (reviewed stale file). After excluding invalid findings, remaining issues are MINOR: magic numbers uncommented, gap threshold mismatch between code (500ms) and spec (300ms).",
-      "overridden": true,
-      "override_reason": "Expert B analyzed stale code (chunking functions _split_audio_chunks, _get_audio_duration already removed). B3 B4 B5 findings invalid. B1 resolved by code review consensus: 500ms is the actual threshold, commit message is the inconsistency."
+      "model": "deepseek-v4-pro",
+      "rationale": "Code quality is solid: good docstrings, complete type hints, focused functions. All 18 tests pass. Minor issues are non-blocking (magic numbers, test import hack, resume path gap)."
     }
   ],
   "issues": [
     {
-      "id": "B6",
+      "id": "M1",
       "severity": "MINOR",
-      "description": "Magic numbers (GAP_THRESHOLD_MS=500, max merge length=40) should be module-level constants with docstrings",
+      "file": "video_splitter/extractor/hotwords.py:176",
+      "description": "Magic number 3 in topK=max_count*3 should be a named constant explaining over-capture ratio",
       "status": "ACKNOWLEDGED"
     },
     {
-      "id": "B9",
-      "severity": "TRIVIAL",
-      "description": "Variable name clarity improvements",
+      "id": "M2",
+      "severity": "MINOR",
+      "file": "video_splitter/tests/test_hotwords.py:5",
+      "description": "sys.path.insert hack instead of standard package imports",
       "status": "ACKNOWLEDGED"
     },
     {
-      "id": "A4",
-      "severity": "LOW",
-      "description": "Commit message mentions 300ms but code uses GAP_THRESHOLD_MS=500",
+      "id": "M3",
+      "severity": "MINOR",
+      "file": "video_splitter/pipeline.py:57",
+      "description": "Resume path skips hotword extraction; reference_docs changes between runs use stale hotwords",
       "status": "ACKNOWLEDGED"
     },
     {
-      "id": "A5",
-      "severity": "LOW",
-      "description": "funasr>=1.0.0 version constraint too loose",
+      "id": "M4",
+      "severity": "MINOR",
+      "file": "video_splitter/pipeline.py:78",
+      "description": "Chinese warning uses Unicode escapes — use raw Chinese characters for readability",
+      "status": "ACKNOWLEDGED"
+    },
+    {
+      "id": "M5",
+      "severity": "MINOR",
+      "file": "video_splitter/cli.py:188",
+      "description": "cmd_batch subcommand missing --reference-doc support (feature inconsistency)",
       "status": "ACKNOWLEDGED"
     }
   ],
   "consensus_ratio": 1.0,
-  "files_reviewed": 5,
-  "lines_added": 135,
-  "lines_deleted": 48,
-  "overridden_verdicts": [
-    {
-      "expert": "Expert B",
-      "original": "REQUEST_CHANGES",
-      "reason": "B3 B4 B5 findings based on stale code (chunking functions already removed in this diff). Remaining issues are MINOR/LOW only."
-    }
-  ]
+  "files_reviewed": 7,
+  "lines_added": 183,
+  "lines_changed": 56
 }
