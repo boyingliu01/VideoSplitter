@@ -2,7 +2,7 @@
 import sys
 import importlib
 
-sys.path.insert(0, r'E:\Private\skill开发\.worktrees\sprint\sprint-2026-06-02-01')
+sys.path.insert(0, r'E:\Private\VideoSplitter\.worktrees\sprint\sprint-2026-07-08-02')
 transcribe_mod = importlib.import_module('video_splitter.extractor.transcribe')
 
 

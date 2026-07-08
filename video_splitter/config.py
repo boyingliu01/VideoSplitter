@@ -8,9 +8,9 @@ from dataclasses import dataclass
 
 @dataclass
 class SplitConfig:
-    model_size: str = "large-v3"
+    model_size: str = "paraformer-zh"
     device: str = "auto"
-    compute_type: str = "auto"
+    compute_type: str = "auto"  # No-op under FunASR; kept for backward compat
     max_segment_duration: int = 15
     min_segment_duration: int = 1
     llm_api_base: str = "https://lab.iwhalecloud.com/gpt-proxy"

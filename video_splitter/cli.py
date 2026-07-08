@@ -98,12 +98,12 @@ def cmd_check(args):
         issues.append("FFmpeg not found in PATH")
         print("[FAIL] FFmpeg not found")
 
-    # Check faster-whisper
+    # Check FunASR
     try:
-        from faster_whisper import WhisperModel
-        print("[OK] faster-whisper: available")
+        from funasr import AutoModel
+        print("[OK] FunASR: available")
         # Quick benchmark
-        import tempfile, wave, struct, numpy as np
+        import tempfile, wave, time, os
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_path = tmp.name
         # Generate 10s of 16kHz silent audio
@@ -111,17 +111,14 @@ def cmd_check(args):
             wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
             wf.writeframes(b'\x00' * 16000 * 2 * 10)
         t0 = time.time()
-        model = WhisperModel("tiny", device="cpu", compute_type="int8")
-        segments, info = model.transcribe(tmp_path, language="zh")
-        # consume generator
-        for _ in segments: pass
+        model = AutoModel(model="paraformer-zh", device="cpu")
+        res = model.generate(input=tmp_path)
         elapsed = time.time() - t0
         os.unlink(tmp_path)
-        print(f"[OK] Whisper benchmark (tiny/cpu): {elapsed:.1f}s for 10s audio")
-        print(f"    Estimated large-v3 CPU: ~{elapsed * 300:.0f}s per hour of video")
+        print(f"[OK] FunASR benchmark (paraformer-zh/cpu): {elapsed:.1f}s for 10s audio")
     except Exception as e:
-        issues.append(f"faster-whisper check failed: {e}")
-        print(f"[FAIL] faster-whisper: {e}")
+        issues.append(f"FunASR check failed: {e}")
+        print(f"[FAIL] FunASR: {e}")
 
     # Check json-repair
     try:
@@ -187,7 +184,7 @@ def main():
     p = sub.add_parser("split", help="Full pipeline: split video by topic")
     p.add_argument("video", help="Input video path")
     p.add_argument("--max-duration", type=int, default=15, help="Max segment duration in minutes (default: 15)")
-    p.add_argument("--model", choices=["tiny", "base", "small", "medium", "large-v3"], help="Whisper model size")
+    p.add_argument("--model", choices=["paraformer-zh"], help="FunASR model name")
     p.add_argument("--cut-mode", choices=["fast", "precise"], help="Cut precision mode")
     p.add_argument("--resume", action="store_true", help="Skip steps with existing intermediate files")
     p.add_argument("--dry-run", action="store_true", help="Estimate cost without LLM call")
@@ -195,7 +192,7 @@ def main():
 
     p = sub.add_parser("transcribe", help="Only transcribe audio to text")
     p.add_argument("video")
-    p.add_argument("--model", choices=["tiny", "base", "small", "medium", "large-v3"])
+    p.add_argument("--model", choices=["paraformer-zh"])
     p.set_defaults(func=cmd_transcribe)
 
     p = sub.add_parser("cut", help="Only cut video using existing chapters.json")
