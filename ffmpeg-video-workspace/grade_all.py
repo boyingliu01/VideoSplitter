@@ -6,7 +6,6 @@ Outputs grading.json for each run directory.
 import subprocess
 import json
 import os
-import sys
 
 WORKSPACE = r"E:\Private\skill开发\ffmpeg-video-workspace\iteration-1"
 
