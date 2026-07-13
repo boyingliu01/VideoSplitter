@@ -1,0 +1,10 @@
+# Architecture constraints for VideoSplitter
+# This file is required by xp-gate quality gates.
+
+layers:
+  - name: video_splitter
+    paths: ["video_splitter/**"]
+    allowed_imports: [video_splitter, ffmpeg_skill]
+  - name: ffmpeg_skill
+    paths: ["ffmpeg-skill/**"]
+    allowed_imports: [ffmpeg_skill]
