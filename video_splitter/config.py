@@ -1,9 +1,19 @@
-"""Configuration management for video_splitter."""
+"""Configuration management for video_splitter.
+
+Dataclass fields:
+    model_size, device, compute_type: Whisper model config
+    max_segment_duration, min_segment_duration: Segment length bounds (seconds)
+    llm_*: LLM summarisation settings
+    cut_mode, keyframe_tolerance: Cutting strategy
+    language, naming_template, resume: Output settings
+    transcription_engine: ASR engine name ("funasr"), overridable via VIDEO_SPLITTER_ENGINE env var
+    engine_config: Engine-specific overrides (model_name, device, etc.)
+"""
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -23,6 +33,8 @@ class SplitConfig:
     language: str = "zh"
     naming_template: str = "{basename}_{seq:02d}_{title}"
     resume: bool = False
+    transcription_engine: str = "funasr"
+    engine_config: dict = field(default_factory=dict)
 
     @classmethod
     def from_env(cls) -> SplitConfig:
@@ -36,4 +48,6 @@ class SplitConfig:
             c.device = os.environ["VIDEO_SPLITTER_DEVICE"]
         if os.environ.get("VIDEO_SPLITTER_RESUME", "").lower() in ("1", "true", "yes"):
             c.resume = True
+        if os.environ.get("VIDEO_SPLITTER_ENGINE"):
+            c.transcription_engine = os.environ["VIDEO_SPLITTER_ENGINE"]
         return c

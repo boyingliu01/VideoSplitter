@@ -24,7 +24,7 @@ def cmd_split(args):
     if args.dry_run:
         pipeline = Pipeline(config)
         result = pipeline.dry_run(args.video)
-        print(f"\n=== Dry Run ===")
+        print("\n=== Dry Run ===")
         print(f"Video: {args.video}")
         print(f"Duration: {result.get('duration_minutes', '?')} min")
         print(f"Estimated tokens: {result.get('estimated_tokens', '?')}")
@@ -34,7 +34,7 @@ def cmd_split(args):
 
     pipeline = Pipeline(config)
     result = pipeline.run(args.video)
-    print(f"\n=== Split Complete ===")
+    print("\n=== Split Complete ===")
     print(f"Video: {result['video']}")
     print(f"Status: {result['status']}")
     print(f"Segments: {len(result['output_files'])}")
@@ -103,18 +103,22 @@ def cmd_check(args):
         from faster_whisper import WhisperModel
         print("[OK] faster-whisper: available")
         # Quick benchmark
-        import tempfile, wave, struct, numpy as np
+        import tempfile
+        import wave
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_path = tmp.name
         # Generate 10s of 16kHz silent audio
         with wave.open(tmp_path, "w") as wf:
-            wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
             wf.writeframes(b'\x00' * 16000 * 2 * 10)
         t0 = time.time()
         model = WhisperModel("tiny", device="cpu", compute_type="int8")
         segments, info = model.transcribe(tmp_path, language="zh")
         # consume generator
-        for _ in segments: pass
+        for _seg in segments:
+            pass
         elapsed = time.time() - t0
         os.unlink(tmp_path)
         print(f"[OK] Whisper benchmark (tiny/cpu): {elapsed:.1f}s for 10s audio")
@@ -125,7 +129,7 @@ def cmd_check(args):
 
     # Check json-repair
     try:
-        from json_repair import repair_json
+        import json_repair  # noqa: F401  # used to test availability
         print("[OK] json-repair: available")
     except ImportError:
         issues.append("json-repair not installed (pip install json-repair)")
@@ -184,11 +188,20 @@ def cmd_batch(args):
     # Summary
     ok = sum(1 for r in results if r["status"] == "success")
     failed = sum(1 for r in results if r["status"] == "error")
-    print(f"\n=== Batch Complete ===")
+    print("\n=== Batch Complete ===")
     print(f"Total: {len(results)}, OK: {ok}, Failed: {failed}")
     for r in results:
         status = "[OK]" if r["status"] == "success" else "[FAIL]"
         print(f"  {status} {os.path.basename(r['video'])} - {r['status']}")
+
+
+def cmd_gui(args):
+    """Launch the PySide6 GUI application."""
+    try:
+        from .gui.app import main as gui_main
+    except ImportError as e:
+        sys.exit(f"GUI dependencies not installed: {e}\nInstall with: pip install PySide6")
+    gui_main()
 
 
 def main():
@@ -224,6 +237,9 @@ def main():
     p.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
     p.add_argument("--no-save", action="store_true", help="Dry-run: don't save changes")
     p.set_defaults(func=cmd_review)
+
+    p = sub.add_parser("gui", help="Launch the PySide6 GUI application")
+    p.set_defaults(func=cmd_gui)
 
     p = sub.add_parser("batch", help="Process all .mp4 files in a directory")
     p.add_argument("dir", help="Directory with .mp4 files")
