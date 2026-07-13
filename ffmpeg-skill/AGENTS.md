@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-Python package providing `FFmpegSkill` — a high-level API wrapping FFmpeg/ffprobe for video/audio processing. Also includes a standalone CLI tool.
+Python package providing `FFmpegSkill` — a high-level API wrapping FFmpeg/ffprobe for video/audio processing. Also includes a standalone CLI tool. Superseded by `video_splitter/` for the main application; retained as a reusable library.
 
 ## STRUCTURE
 
