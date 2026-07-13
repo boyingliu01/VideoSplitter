@@ -1,7 +1,7 @@
 {
   "id": "sprint-2026-07-13-04",
   "task_description": "GUI字幕校对修正功能 — 处理所有Open Issues，集中精力完成字幕校对修正GUI",
-  "phase": 3,
+  "phase": 4,
   "status": "running",
   "started_at": "2026-07-13T03:48:00Z",
   "isolation": {
@@ -48,8 +48,16 @@
     {
       "phase": 3,
       "phase_name": "BUILD",
-      "status": "in_progress",
+      "status": "completed",
       "started_at": "2026-07-13T05:45:00Z",
+      "completed_at": "2026-07-13T13:11:00Z",
+      "duration_seconds": 26760
+    },
+    {
+      "phase": 4,
+      "phase_name": "VERIFY",
+      "status": "in_progress",
+      "started_at": "2026-07-13T13:11:00Z",
       "completed_at": null,
       "duration_seconds": null
     }
