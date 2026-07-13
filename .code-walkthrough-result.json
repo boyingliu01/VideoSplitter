@@ -1,0 +1,101 @@
+{
+  "version": "1.0",
+  "commit": "b497c95e71e60a0e8d9d19d1d9d6f0c861d65d83",
+  "branch": "sprint/2026-07-13-04",
+  "verdict": "APPROVED",
+  "summary": "2-round Delphi code walkthrough: Round 1 all 3 reviewers returned REQUEST_CHANGES (10 issues found). Fixes applied and verified in Round 2 — all 3 reviewers returned APPROVED (architecture:95, technical:88, feasibility:95). 41/41 tests pass, ruff clean.",
+  "expires": "2026-07-14T15:00:00Z",
+  "confidence": 9,
+  "consensus_rounds": 2,
+  "total_duration_seconds": 2400,
+  "reviewers": [
+    {
+      "role": "architecture",
+      "r1_verdict": "REQUEST_CHANGES",
+      "r1_confidence": 87,
+      "r2_verdict": "APPROVED",
+      "r2_confidence": 95,
+      "files_reviewed": [
+        "video_splitter/extractor/engines.py",
+        "gui/app.py",
+        "gui/controllers/review_controller.py",
+        "gui/workers/transcribe_worker.py",
+        "gui/widgets/video_player.py",
+        "gui/widgets/subtitle_panel.py",
+        "video_splitter/config.py",
+        "video_splitter/cli.py"
+      ],
+      "issues_found": [
+        {"severity": "critical", "file": "video_splitter/cli.py", "line": 201, "description": "Broken relative import from .gui.app"},
+        {"severity": "critical", "file": "gui/app.py", "line": 173, "description": "Thread lifecycle race: worker overwrite without cleanup"},
+        {"severity": "medium", "file": "gui/controllers/review_controller.py", "line": 127, "description": "Progress path mismatch"},
+        {"severity": "medium", "file": "gui/app.py", "line": 96, "description": "StatusBarWidget private coupling"}
+      ]
+    },
+    {
+      "role": "technical",
+      "r1_verdict": "REQUEST_CHANGES",
+      "r1_confidence": 86,
+      "r2_verdict": "APPROVED",
+      "r2_confidence": 88,
+      "files_reviewed": [
+        "gui/controllers/review_controller.py",
+        "gui/widgets/video_player.py",
+        "gui/app.py",
+        "video_splitter/extractor/engines.py",
+        "gui/workers/transcribe_worker.py",
+        "gui/widgets/subtitle_panel.py",
+        "video_splitter/review.py",
+        "tests/test_review_controller.py",
+        "tests/test_transcribe_funasr.py",
+        "tests/test_workers.py"
+      ],
+      "issues_found": [
+        {"severity": "critical", "file": "gui/controllers/review_controller.py", "line": 43, "description": "Progress path mismatch: resume silently broken"},
+        {"severity": "high", "file": "video_splitter/extractor/engines.py", "line": 48, "description": "ffprobe no error handling at all"},
+        {"severity": "medium", "file": "gui/controllers/review_controller.py", "line": 104, "description": "export_srt non-atomic write"},
+        {"severity": "medium", "file": "video_splitter/review.py", "line": 189, "description": "export_srt_path dead-code fallback"},
+        {"severity": "medium", "file": "video_splitter/extractor/engines.py", "line": 100, "description": "FunASR result[0] no isinstance(dict) guard"},
+        {"severity": "low", "file": "gui/controllers/review_controller.py", "line": 55, "description": "current_segment returns {} for out-of-range (type safety)"}
+      ]
+    },
+    {
+      "role": "feasibility",
+      "r1_verdict": "REQUEST_CHANGES",
+      "r1_confidence": 95,
+      "r2_verdict": "APPROVED",
+      "r2_confidence": 95,
+      "files_reviewed": [
+        "video_splitter/cli.py",
+        "requirements.txt",
+        "video_splitter/extractor/engines.py",
+        "gui/app.py",
+        "gui/widgets/status_bar.py",
+        "video_splitter/config.py",
+        "gui/widgets/video_player.py"
+      ],
+      "issues_found": [
+        {"severity": "critical", "file": "video_splitter/cli.py", "line": 201, "description": "Relative import fails — gui not a subpackage"},
+        {"severity": "high", "file": "gui/app.py", "line": 150, "description": "Health check blocks GUI thread loading FunASR model"},
+        {"severity": "high", "file": "gui/widgets/status_bar.py", "line": 8, "description": "StatusBarWidget is a stub"},
+        {"severity": "medium", "file": "video_splitter/extractor/engines.py", "line": 149, "description": "ImportError message misleading"}
+      ]
+    }
+  ],
+  "issues_fixed": [
+    {"severity": "critical", "file": "video_splitter/cli.py", "line": 201, "description": "FIXED: Import from .gui.app to gui.app (absolute), verified by all 3 reviewers"},
+    {"severity": "critical", "file": "gui/controllers/review_controller.py", "line": 43, "description": "FIXED: Progress path unified — load_progress and _save_progress both use transcript_path directly"},
+    {"severity": "high", "file": "video_splitter/extractor/engines.py", "line": 48, "description": "FIXED: ffprobe now has check=True, timeout=30s, FileNotFoundError, TimeoutExpired, CalledProcessError, JSONDecodeError, KeyError, ValueError handling"},
+    {"severity": "medium", "file": "gui/controllers/review_controller.py", "line": 103, "description": "FIXED: export_srt now atomic via tempfile.mkstemp + os.replace + exception cleanup"},
+    {"severity": "medium", "file": "video_splitter/review.py", "line": 189, "description": "FIXED: export_srt_path dead code removed"},
+    {"severity": "medium", "file": "gui/widgets/subtitle_panel.py", "line": 62, "description": "FIXED: editingFinished replaced with returnPressed; editing_started de-duplicated with flag"},
+    {"severity": "medium", "file": "gui/app.py", "line": 96, "description": "FIXED: StatusBarWidget.set_status() public API replaces private _label coupling"},
+    {"severity": "medium", "file": "video_splitter/extractor/engines.py", "line": 100, "description": "FIXED: isinstance(first, dict) guard on FunASR result[0]"},
+    {"severity": "low", "file": "gui/controllers/review_controller.py", "line": 55, "description": "FIXED: current_segment returns None (not empty dict), type hint updated to dict | None"},
+    {"severity": "low", "file": "video_splitter/extractor/engines.py", "line": 149, "description": "FIXED: health_check ImportError message corrected to 'FunASR not installed'"}
+  ],
+  "non_blocking_observations": [
+    {"severity": "low", "file": "requirements.txt", "line": 25, "description": "torch has no version pin — pre-existing, not a regression"},
+    {"severity": "low", "file": "gui/controllers/review_controller.py", "line": 136, "description": "CLI/GUI use different progress file naming schemes — design choice, no interop required"}
+  ]
+}

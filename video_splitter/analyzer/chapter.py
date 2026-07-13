@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 try:
     from json_repair import repair_json  # type: ignore[import-untyped]
@@ -193,7 +193,6 @@ class ChapterDetector:
         self, prompt: str, video_duration: float
     ) -> List[Chapter]:
         """Call LLM with retry, json-repair, and uniform-split fallback."""
-        last_error: Optional[Exception] = None
         for attempt in range(self.config.llm_max_retries + 1):
             try:
                 if attempt > 0:
@@ -201,8 +200,7 @@ class ChapterDetector:
                 raw = self._llm_request(prompt)
                 chapters = self._parse_response(raw, video_duration)
                 return chapters
-            except Exception as e:
-                last_error = e
+            except Exception:
                 continue
 
         return self._uniform_split(video_duration)
