@@ -11,7 +11,6 @@ import json
 import os
 import re
 from typing import List, Optional, Callable, Dict, Any
-from pathlib import Path
 
 
 class FFmpegError(Exception):
@@ -82,8 +81,8 @@ class FFmpegSkill:
             )
             if result.returncode != 0:
                 raise FFmpegError(
-                    f"FFmpeg is not working properly. "
-                    f"Please ensure FFmpeg is installed and in your PATH."
+                    "FFmpeg is not working properly. "
+                    "Please ensure FFmpeg is installed and in your PATH."
                 )
         except FileNotFoundError:
             raise FFmpegError(

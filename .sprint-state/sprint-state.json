@@ -1,11 +1,65 @@
 {
-  "phase": -1,
+  "id": "sprint-2026-07-13-04",
+  "task_description": "GUI字幕校对修正功能 — 处理所有Open Issues，集中精力完成字幕校对修正GUI",
+  "phase": 3,
   "status": "running",
-  "id": "sprint-2026-06-02-01",
+  "started_at": "2026-07-13T03:48:00Z",
   "isolation": {
+    "worktree_path": ".worktrees/sprint/sprint-2026-07-13-04",
+    "branch": "sprint/2026-07-13-04",
     "created_from": "master",
-    "worktree_path": ".worktrees/sprint/sprint-2026-06-02-01",
-    "created_from_commit": "30b470f",
-    "branch": "sprint/2026-06-02-01"
+    "created_from_commit": "d9f421e4e4861d032f06284b01f7c31bb9cd677e"
+  },
+  "auto_estimate": {
+    "change_type": "新增功能",
+    "metrics": {},
+    "estimated_level": "complex",
+    "recommended_flow": "完整 Sprint Flow (6 阶段)",
+    "risk_warnings": ["GUI框架选型需慎重", "涉及视频播放器集成", "与现有CLI review功能需兼容"],
+    "user_decision": "accepted",
+    "override_reason": null
+  },
+  "open_issues": [
+    {
+      "number": 4,
+      "title": "GUI subtitle review: video player + interactive editing + topic splitting",
+      "state": "OPEN",
+      "labels": ["enhancement"],
+      "created_at": "2026-07-13T01:44:11Z"
+    }
+  ],
+  "phase_history": [
+    {
+      "phase": 1,
+      "phase_name": "PREP",
+      "status": "completed",
+      "started_at": "2026-07-13T03:48:00Z",
+      "completed_at": "2026-07-13T04:10:00Z",
+      "duration_seconds": 1320
+    },
+    {
+      "phase": 2,
+      "phase_name": "DESIGN",
+      "status": "completed",
+      "started_at": "2026-07-13T04:10:00Z",
+      "completed_at": "2026-07-13T05:45:00Z",
+      "duration_seconds": 5700
+    },
+    {
+      "phase": 3,
+      "phase_name": "BUILD",
+      "status": "in_progress",
+      "started_at": "2026-07-13T05:45:00Z",
+      "completed_at": null,
+      "duration_seconds": null
+    }
+  ],
+  "outputs": {
+    "design_doc": "docs/superpowers/specs/2026-07-13-gui-subtitle-review-design.md",
+    "delphi_review": ".sprint-state/delphi-reviewed.json"
+  },
+  "metrics": {
+    "tests_passed": 70,
+    "tests_failed": 0
   }
 }

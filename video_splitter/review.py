@@ -8,7 +8,7 @@ import logging
 import tempfile
 import unicodedata
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +186,21 @@ def format_segment_header(index: int, total: int, modified: int, seg: dict) -> s
     )
 
 
+def export_srt_path(transcript_path: str) -> str:
+    """Generate SRT output path from transcript JSON path.
+
+    Args:
+        transcript_path: Path to transcript.json
+
+    Returns:
+        Path to output .srt file (e.g. ``video.zh.srt``).
+    """
+    srt_path = str(Path(transcript_path).with_suffix("").with_suffix(".srt"))
+    if not srt_path.endswith(".srt"):
+        srt_path = str(Path(transcript_path).with_suffix(".srt"))
+    return srt_path
+
+
 def run_review(
     video_path: str,
     transcript_path: str | None = None,
@@ -227,10 +242,8 @@ def run_review(
     print(f"\n{'='*60}")
     print(f"Transcript Review: {os.path.basename(video_path)}")
     print(f"Segments: {total}  |  Language: {transcript.get('language', '?')}")
-    print(f"Commands: Enter=keep  :q=quit  :p=prev  :h=help  :j N=jump")
+    print("Commands: Enter=keep  :q=quit  :p=prev  :h=help  :j N=jump")
     print(f"{'='*60}\n")
-
-    last_input = None
 
     while current_index < total:
         seg = segments[current_index]
@@ -297,7 +310,6 @@ def run_review(
                     modified_count += 1
                     print(f"  ✓ Updated to: {sanitized}")
 
-        last_input = user_input
         current_index += 1
 
         # Save progress after each segment
@@ -316,7 +328,7 @@ def run_review(
     else:
         print(f"\n{'='*60}")
         print(f"Review complete. {modified_count} segments changed.")
-        print(f"Saving transcript...")
+        print("Saving transcript...")
         print(f"{'='*60}")
 
         # Atomic save transcript
@@ -326,10 +338,7 @@ def run_review(
         try:
             from .extractor.transcribe import to_srt
             srt_content = to_srt(transcript)
-            srt_path = str(Path(transcript_path).with_suffix("").with_suffix(".srt"))
-            # Ensure we have a clean SRT path
-            if not srt_path.endswith(".srt"):
-                srt_path = str(Path(transcript_path).with_suffix(".srt"))
+            srt_path = export_srt_path(transcript_path)
             with open(srt_path, "w", encoding="utf-8") as f:
                 f.write(srt_content)
             print(f"SRT updated: {srt_path}")

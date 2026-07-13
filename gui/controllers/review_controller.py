@@ -1,0 +1,133 @@
+"""Review state machine + transcript IO + progress persistence"""
+
+from __future__ import annotations
+
+import os
+
+from PySide6.QtCore import QObject, Signal
+
+from video_splitter.review import (
+    export_srt_path,
+    load_progress,
+    load_transcript,
+    sanitize_text,
+    save_progress,
+    save_transcript_atomic,
+)
+from video_splitter.extractor.transcribe import to_srt
+
+
+class ReviewController(QObject):
+    """Review state machine + transcript IO + progress persistence."""
+
+    segment_changed = Signal(dict)
+    progress_loaded = Signal(dict)
+    transcript_saved = Signal()
+    error = Signal(str)
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._segments: list[dict] = []
+        self._current_index: int = 0
+        self._modified_indices: set[int] = set()
+        self._transcript_path: str = ""
+        self._progress_path: str = ""
+
+    def load_transcript(self, path: str) -> list[dict]:
+        self._transcript_path = path
+        self._progress_path = path.rsplit(".json", 1)[0] + ".review_progress.json"
+
+        transcript = load_transcript(path)
+        self._segments = transcript["segments"]
+
+        progress = load_progress(path.replace("transcript.json", "") if path.endswith(".transcript.json") else path) or {}
+        self._current_index = progress.get("current_index", 0)
+        self._modified_indices = set(progress.get("modified_indices", []))
+        total = len(self._segments)
+
+        self.progress_loaded.emit({
+            "current_index": self._current_index,
+            "modified_indices": list(self._modified_indices),
+            "total": total,
+        })
+        return self._segments
+
+    def current_segment(self) -> dict:
+        if 0 <= self._current_index < len(self._segments):
+            seg = self._segments[self._current_index]
+            return {
+                "text": seg["text"],
+                "start": seg["start"],
+                "end": seg["end"],
+                "index": self._current_index,
+            }
+        return {}
+
+    def save_correction(self, text: str, index: int) -> None:
+        if index < 0 or index >= len(self._segments):
+            self.error.emit(f"Invalid segment index: {index}")
+            return
+
+        sanitized = sanitize_text(text)
+        if not sanitized:
+            self.error.emit("Text is empty after sanitization")
+            return
+
+        self._segments[index]["text"] = sanitized
+        self._modified_indices.add(index)
+
+        transcript = {"segments": self._segments}
+        try:
+            save_transcript_atomic(self._transcript_path, transcript)
+            self._save_progress()
+        except Exception as e:
+            self.error.emit(str(e))
+
+    def next(self) -> dict | None:
+        if self._current_index + 1 >= len(self._segments):
+            return None
+        self._current_index += 1
+        return self._emit_segment()
+
+    def prev(self) -> dict | None:
+        if self._current_index <= 0:
+            return None
+        self._current_index -= 1
+        return self._emit_segment()
+
+    def jump_to(self, n: int) -> dict | None:
+        if n < 0 or n >= len(self._segments):
+            return None
+        self._current_index = n
+        return self._emit_segment()
+
+    def export_srt(self) -> str:
+        transcript = {"segments": self._segments}
+        srt_content = to_srt(transcript)
+        srt_path = export_srt_path(self._transcript_path)
+        with open(srt_path, "w", encoding="utf-8") as f:
+            f.write(srt_content)
+        return srt_path
+
+    def _emit_segment(self) -> dict:
+        seg = self._segments[self._current_index]
+        data = {
+            "index": self._current_index,
+            "total": len(self._segments),
+            "text": seg["text"],
+            "start": seg["start"],
+            "end": seg["end"],
+            "modified": self._current_index in self._modified_indices,
+        }
+        self._save_progress()
+        self.segment_changed.emit(data)
+        return data
+
+    def _save_progress(self) -> None:
+        base = os.path.splitext(self._transcript_path)[0]
+        save_progress(base, {
+            "current_index": self._current_index,
+            "total": len(self._segments),
+            "modified_count": len(self._modified_indices),
+            "modified_indices": list(self._modified_indices),
+        })
