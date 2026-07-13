@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSplitter,
     QTabWidget,
-    QVBoxLayout,
 )
 
 from gui.controllers.review_controller import ReviewController
@@ -93,10 +92,6 @@ class MainWindow(QMainWindow):
     def _build_status(self) -> None:
         self._status_bar_widget = StatusBarWidget()
         self.statusBar().addWidget(self._status_bar_widget, stretch=1)
-        self._status_bar_widget._label = QLabel("Ready", self._status_bar_widget)
-        layout = QVBoxLayout(self._status_bar_widget)
-        layout.setContentsMargins(4, 0, 4, 0)
-        layout.addWidget(self._status_bar_widget._label)
 
     def _connect_signals(self) -> None:
         sp = self._subtitle_panel
@@ -148,7 +143,7 @@ class MainWindow(QMainWindow):
     def _run_health_check(self) -> None:
         try:
             ok, msg = FunASREngine().health_check()
-            self._status_bar_widget._label.setText(f"Engine: {'OK' if ok else msg}")
+            self._status_bar_widget.set_status(f"Engine: {'OK' if ok else msg}")
             if not ok:
                 QMessageBox.warning(
                     self,
@@ -157,7 +152,7 @@ class MainWindow(QMainWindow):
                     "You can still work with existing transcripts.",
                 )
         except Exception as exc:
-            self._status_bar_widget._label.setText(f"Engine: error - {exc}")
+            self._status_bar_widget.set_status(f"Engine: error - {exc}")
 
     def _on_open_video(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -203,24 +198,24 @@ class MainWindow(QMainWindow):
             self._controller.save_correction(text, seg["index"])
         result = self._controller.next()
         if result is None:
-            self._status_bar_widget._label.setText("Review complete — all segments reviewed")
+            self._status_bar_widget.set_status("Review complete — all segments reviewed")
 
     def _on_save_current(self) -> None:
         seg = self._controller.current_segment()
         if seg:
             text = self._subtitle_panel.get_correction()
             self._controller.save_correction(text, seg["index"])
-            self._status_bar_widget._label.setText("Saved")
+            self._status_bar_widget.set_status("Saved")
 
     def _on_next_skip(self) -> None:
         result = self._controller.next()
         if result is None:
-            self._status_bar_widget._label.setText("Review complete — all segments reviewed")
+            self._status_bar_widget.set_status("Review complete — all segments reviewed")
 
     def _on_position_changed(self, position_ms: int) -> None:
         secs = position_ms / 1000.0
         t = f"{int(secs // 60):02d}:{int(secs % 60):02d}"
-        self._status_bar_widget._label.setText(f"Position: {t}")
+        self._status_bar_widget.set_status(f"Position: {t}")
 
     def _on_segment_changed(self, data: dict) -> None:
         self._subtitle_panel.set_segment(
@@ -238,15 +233,15 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "Error", msg)
 
     def _on_transcribe_progress(self, frac: float, desc: str) -> None:
-        self._status_bar_widget._label.setText(f"Transcribing: {desc} ({frac:.0%})")
+        self._status_bar_widget.set_status(f"Transcribing: {desc} ({frac:.0%})")
 
     def _on_transcribe_finished(self, transcript: dict) -> None:
-        self._status_bar_widget._label.setText("Transcription complete")
+        self._status_bar_widget.set_status("Transcription complete")
         self._cleanup_thread()
 
     def _on_transcribe_error(self, msg: str) -> None:
         QMessageBox.warning(self, "Transcription Error", msg)
-        self._status_bar_widget._label.setText("Transcription failed")
+        self._status_bar_widget.set_status("Transcription failed")
         self._cleanup_thread()
 
     def _cleanup_thread(self) -> None:

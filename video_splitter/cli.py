@@ -198,7 +198,7 @@ def cmd_batch(args):
 def cmd_gui(args):
     """Launch the PySide6 GUI application."""
     try:
-        from .gui.app import main as gui_main
+        from gui.app import main as gui_main
     except ImportError as e:
         sys.exit(f"GUI dependencies not installed: {e}\nInstall with: pip install PySide6")
     gui_main()

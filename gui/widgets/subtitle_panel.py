@@ -28,6 +28,7 @@ class SubtitlePanel(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._editing_triggered: bool = False
 
         self._segment_label = QLabel("Segment 0/0", self)
         self._segment_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -59,7 +60,7 @@ class SubtitlePanel(QWidget):
         self._jump_spin = QSpinBox(self)
         self._jump_spin.setPrefix("跳到... ")
         self._jump_spin.setValue(1)
-        self._jump_spin.editingFinished.connect(
+        self._jump_spin.lineEdit().returnPressed.connect(
             lambda: self.jump_requested.emit(self._jump_spin.value())
         )
 
@@ -89,7 +90,9 @@ class SubtitlePanel(QWidget):
         layout.addLayout(nav_layout)
 
     def _on_text_changed(self) -> None:
-        self.editing_started.emit()
+        if not self._editing_triggered:
+            self._editing_triggered = True
+            self.editing_started.emit()
 
     def set_segment(
         self,
@@ -99,6 +102,7 @@ class SubtitlePanel(QWidget):
         start_time: float,
         end_time: float,
     ) -> None:
+        self._editing_triggered = False
         self._segment_label.setText(f"Segment {index + 1}/{total}")
         self._timestamp_label.setText(
             f"[{format_timestamp(start_time)}]"

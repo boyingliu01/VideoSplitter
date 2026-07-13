@@ -193,12 +193,9 @@ def export_srt_path(transcript_path: str) -> str:
         transcript_path: Path to transcript.json
 
     Returns:
-        Path to output .srt file (e.g. ``video.zh.srt``).
+        Path to output .srt file (e.g. ``video.transcript.srt``).
     """
-    srt_path = str(Path(transcript_path).with_suffix("").with_suffix(".srt"))
-    if not srt_path.endswith(".srt"):
-        srt_path = str(Path(transcript_path).with_suffix(".srt"))
-    return srt_path
+    return str(Path(transcript_path).with_suffix("").with_suffix(".srt"))
 
 
 def run_review(

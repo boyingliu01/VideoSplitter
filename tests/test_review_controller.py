@@ -114,7 +114,7 @@ class TestNavigation:
         ctrl = ReviewController()
         ctrl._segments = []
         result = ctrl.current_segment()
-        assert result == {}
+        assert result is None
 
 
 class TestSaveCorrection:
@@ -198,8 +198,14 @@ class TestExportSrt:
         with (
             patch("gui.controllers.review_controller.to_srt") as mock_to_srt,
             patch("gui.controllers.review_controller.export_srt_path", return_value=expected_srt),
-            patch("builtins.open", mock_open()),
+            patch("tempfile.mkstemp") as mock_mkstemp,
+            patch("gui.controllers.review_controller.os.fdopen") as mock_fdopen,
+            patch("gui.controllers.review_controller.os.replace"),
+            patch("gui.controllers.review_controller.os.unlink"),
         ):
+            mock_mkstemp.return_value = (99, os.path.join(tempfile.gettempdir(), "tmp_export.srt"))
+            mock_f = MagicMock()
+            mock_fdopen.return_value.__enter__.return_value = mock_f
             result = ctrl.export_srt()
         assert result == expected_srt
         mock_to_srt.assert_called_once()

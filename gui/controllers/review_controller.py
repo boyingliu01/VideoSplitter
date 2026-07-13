@@ -35,12 +35,11 @@ class ReviewController(QObject):
 
     def load_transcript(self, path: str) -> list[dict]:
         self._transcript_path = path
-        self._progress_path = path.rsplit(".json", 1)[0] + ".review_progress.json"
 
         transcript = load_transcript(path)
         self._segments = transcript["segments"]
 
-        progress = load_progress(path.replace("transcript.json", "") if path.endswith(".transcript.json") else path) or {}
+        progress = load_progress(path) or {}
         self._current_index = progress.get("current_index", 0)
         self._modified_indices = set(progress.get("modified_indices", []))
         total = len(self._segments)
@@ -52,7 +51,7 @@ class ReviewController(QObject):
         })
         return self._segments
 
-    def current_segment(self) -> dict:
+    def current_segment(self) -> dict | None:
         if 0 <= self._current_index < len(self._segments):
             seg = self._segments[self._current_index]
             return {
@@ -61,7 +60,7 @@ class ReviewController(QObject):
                 "end": seg["end"],
                 "index": self._current_index,
             }
-        return {}
+        return None
 
     def save_correction(self, text: str, index: int) -> None:
         if index < 0 or index >= len(self._segments):
@@ -102,11 +101,28 @@ class ReviewController(QObject):
         return self._emit_segment()
 
     def export_srt(self) -> str:
+        """Export segments as SRT file (atomic write via tempfile).
+        
+        Returns:
+            Path to the saved SRT file.
+        
+        Raises:
+            OSError: If the file cannot be written.
+        """
         transcript = {"segments": self._segments}
         srt_content = to_srt(transcript)
         srt_path = export_srt_path(self._transcript_path)
-        with open(srt_path, "w", encoding="utf-8") as f:
-            f.write(srt_content)
+        import tempfile
+        fd, tmp_path = tempfile.mkstemp(
+            suffix=".srt", prefix="vs_export_", dir=os.path.dirname(srt_path) or "."
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(srt_content)
+            os.replace(tmp_path, srt_path)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
         return srt_path
 
     def _emit_segment(self) -> dict:
@@ -124,8 +140,7 @@ class ReviewController(QObject):
         return data
 
     def _save_progress(self) -> None:
-        base = os.path.splitext(self._transcript_path)[0]
-        save_progress(base, {
+        save_progress(self._transcript_path, {
             "current_index": self._current_index,
             "total": len(self._segments),
             "modified_count": len(self._modified_indices),

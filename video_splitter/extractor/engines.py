@@ -46,20 +46,40 @@ class TranscriptionEngine(ABC):
 
 
 def _get_audio_duration_ffprobe(audio_path: str) -> float:
-    """Get audio duration in seconds via ffprobe."""
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "json",
-            audio_path,
-        ],
-        capture_output=True,
-        text=True,
-    )
-    info = json.loads(result.stdout)
-    return float(info["format"]["duration"])
+    """Get audio duration in seconds via ffprobe.
+
+    Raises:
+        RuntimeError: If ffprobe is not found, times out, or returns invalid output.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "json",
+                audio_path,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("ffprobe not found. Install FFmpeg and ensure it is on PATH.")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"ffprobe timed out on: {audio_path}")
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"ffprobe failed on {audio_path}: {e.stderr.strip()}")
+
+    try:
+        info = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError(f"ffprobe returned non-JSON output for: {audio_path}")
+    try:
+        return float(info["format"]["duration"])
+    except (KeyError, ValueError):
+        raise RuntimeError(f"Cannot parse duration from ffprobe output for: {audio_path}")
 
 
 class FunASREngine(TranscriptionEngine):
@@ -98,7 +118,7 @@ class FunASREngine(TranscriptionEngine):
             progress_callback(0.8, "Processing results...")
 
         if isinstance(result, list) and len(result) > 0:
-            first = result[0]
+            first = result[0] if isinstance(result[0], dict) else {}
         else:
             first = {}
 
@@ -147,7 +167,7 @@ class FunASREngine(TranscriptionEngine):
             model.generate(input=dummy_wav)
             return True, "ok"
         except ImportError:
-            return False, "Model not downloaded. Install: pip install funasr"
+            return False, "FunASR not installed. Install: pip install funasr"
         except Exception as e:
             return False, str(e)
 

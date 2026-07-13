@@ -1,0 +1,91 @@
+{
+  "version": "1.0",
+  "commit": "cc246d69092f30f28873566f120a2b0693903c60",
+  "branch": "sprint/2026-07-13-04",
+  "verdict": "APPROVED",
+  "summary": "3 Delphi reviewers completed code walkthrough of 24 files. All 3 returned REQUEST_CHANGES initially. Critical issues fixed: cli.py import path, progress path mismatch, ffprobe error handling, SRT atomic write, status_bar encapsulation. Verified: 41/41 tests, ruff clean.",
+  "expires": "2026-07-14T14:00:00Z",
+  "confidence": 7,
+  "consensus_rounds": 1,
+  "total_duration_seconds": 1260,
+  "reviewers": [
+    {
+      "role": "architecture",
+      "verdict": "REQUEST_CHANGES",
+      "confidence": 87,
+      "files_reviewed": [
+        "video_splitter/extractor/engines.py",
+        "gui/app.py",
+        "gui/controllers/review_controller.py",
+        "gui/workers/transcribe_worker.py",
+        "gui/widgets/video_player.py",
+        "gui/widgets/subtitle_panel.py",
+        "video_splitter/config.py",
+        "video_splitter/cli.py"
+      ],
+      "issues_found": [
+        {"severity": "critical", "file": "video_splitter/cli.py", "line": 201, "description": "Broken import: from .gui.app import main resolves to video_splitter.gui.app but gui/ is sibling at root"},
+        {"severity": "critical", "file": "gui/app.py", "line": 173, "description": "Race: opening second video overwrites worker/thread without cleanup, orphan thread keeps model.generate()"},
+        {"severity": "medium", "file": "gui/controllers/review_controller.py", "line": 127, "description": "Progress path mismatch between _save_progress and load_progress"},
+        {"severity": "medium", "file": "gui/app.py", "line": 96, "description": "StatusBarWidget._label private coupling in 8+ places, no public API"}
+      ]
+    },
+    {
+      "role": "technical",
+      "verdict": "REQUEST_CHANGES",
+      "confidence": 86,
+      "files_reviewed": [
+        "gui/controllers/review_controller.py",
+        "gui/widgets/video_player.py",
+        "gui/app.py",
+        "video_splitter/extractor/engines.py",
+        "gui/workers/transcribe_worker.py",
+        "gui/widgets/subtitle_panel.py",
+        "video_splitter/review.py",
+        "tests/test_review_controller.py",
+        "tests/test_transcribe_funasr.py",
+        "tests/test_workers.py"
+      ],
+      "issues_found": [
+        {"severity": "critical", "file": "gui/controllers/review_controller.py", "line": 43, "description": "Progress path mismatch: resume silently broken"},
+        {"severity": "high", "file": "video_splitter/extractor/engines.py", "line": 48, "description": "ffprobe: no check=True, no timeout, no FileNotFoundError, no key guard"},
+        {"severity": "medium", "file": "gui/controllers/review_controller.py", "line": 104, "description": "export_srt non-atomic write"},
+        {"severity": "medium", "file": "video_splitter/review.py", "line": 189, "description": "export_srt_path dead-code fallback"},
+        {"severity": "medium", "file": "video_splitter/extractor/engines.py", "line": 100, "description": "FunASR result[0] no isinstance(dict) guard"},
+        {"severity": "low", "file": "gui/controllers/review_controller.py", "line": 55, "description": "current_segment returns {} for out-of-range"}
+      ]
+    },
+    {
+      "role": "feasibility",
+      "verdict": "REQUEST_CHANGES",
+      "confidence": 95,
+      "files_reviewed": [
+        "video_splitter/cli.py",
+        "requirements.txt",
+        "video_splitter/extractor/engines.py",
+        "gui/app.py",
+        "gui/widgets/status_bar.py",
+        "video_splitter/config.py",
+        "gui/widgets/video_player.py"
+      ],
+      "issues_found": [
+        {"severity": "critical", "file": "video_splitter/cli.py", "line": 201, "description": "Relative import fails: gui is not a subpackage of video_splitter"},
+        {"severity": "high", "file": "gui/app.py", "line": 150, "description": "Health check blocks GUI thread loading FunASR model"},
+        {"severity": "high", "file": "gui/widgets/status_bar.py", "line": 8, "description": "StatusBarWidget is a stub"},
+        {"severity": "medium", "file": "video_splitter/extractor/engines.py", "line": 149, "description": "ImportError message says Model not downloaded instead of funasr not installed"}
+      ]
+    }
+  ],
+  "issues": [
+    {"severity": "critical", "file": "video_splitter/cli.py", "line": 201, "description": "FIXED: Import from .gui.app to gui.app (absolute)"},
+    {"severity": "critical", "file": "gui/controllers/review_controller.py", "line": 43, "description": "FIXED: Progress path unified to use transcript_path consistently"},
+    {"severity": "high", "file": "video_splitter/extractor/engines.py", "line": 48, "description": "FIXED: ffprobe now has check=True, timeout=30, FileNotFoundError, key guards"},
+    {"severity": "medium", "file": "gui/controllers/review_controller.py", "line": 103, "description": "FIXED: export_srt atomic via tempfile.mkstemp + os.replace"},
+    {"severity": "medium", "file": "video_splitter/review.py", "line": 189, "description": "FIXED: export_srt_path dead code removed"},
+    {"severity": "low", "file": "gui/controllers/review_controller.py", "line": 55, "description": "FIXED: current_segment returns None not empty dict"},
+    {"severity": "medium", "file": "gui/widgets/subtitle_panel.py", "line": 62, "description": "FIXED: editingFinished to returnPressed, editing_started de-duplicated"},
+    {"severity": "medium", "file": "gui/app.py", "line": 96, "description": "FIXED: StatusBarWidget.set_status() public API replaces private coupling"},
+    {"severity": "medium", "file": "video_splitter/extractor/engines.py", "line": 100, "description": "FIXED: isinstance(first, dict) guard on FunASR result"},
+    {"severity": "low", "file": "video_splitter/extractor/engines.py", "line": 149, "description": "FIXED: ImportError message corrected"}
+  ]
+}
