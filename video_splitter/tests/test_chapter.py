@@ -1,6 +1,7 @@
 """Tests for analyzer/chapter.py"""
 import os
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -103,3 +104,99 @@ class TestChapterModel:
         assert "01_概述" in r
         assert "00:00.000" in r
         assert "05:00.000" in r
+
+
+class TestChapterDetection:
+    """Tests for ChapterDetector.detect() — LLM integration with mocking."""
+
+    def test_detect_single_call_short_transcript(self, detector_15min):
+        """Single LLM call path: transcript within token budget."""
+        transcript = {
+            "duration": 300.0,
+            "segments": [
+                {"text": "第一段", "start": 0.0, "end": 150.0},
+                {"text": "第二段", "start": 150.0, "end": 300.0},
+            ],
+        }
+        fake_chapters = [
+            Chapter("01_简介", 0.0, 150.0),
+            Chapter("02_正文", 150.0, 300.0),
+        ]
+        with patch.object(detector_15min, "_single_detect", return_value=fake_chapters):
+            chapters = detector_15min.detect(transcript)
+        assert len(chapters) == 2
+        assert chapters[0].title == "01_简介"
+        assert chapters[1].title == "02_正文"
+
+    def test_detect_falls_back_to_uniform_on_llm_failure(self, detector_15min):
+        """When all LLM retries fail, fall back to uniform split."""
+        transcript = {
+            "duration": 1800.0,
+            "segments": [
+                {"text": "短文本", "start": 0.0, "end": 10.0},
+            ],
+        }
+        with patch.object(detector_15min, "_call_llm", side_effect=Exception("API down")):
+            chapters = detector_15min.detect(transcript)
+        # Should fall back to uniform split for 1800s video at 15min/segment = 2 segments
+        assert len(chapters) == 2
+
+    def test_build_transcript_text(self, detector_15min):
+        """_build_transcript_text formats segments with timestamps."""
+        transcript = {
+            "duration": 120.0,
+            "segments": [
+                {"text": "你好", "start": 0.0, "end": 60.0},
+                {"text": "世界", "start": 60.0, "end": 120.0},
+            ],
+        }
+        result = detector_15min._build_transcript_text(transcript)
+        assert "[00:00.000] 你好" in result
+        assert "[01:00.000] 世界" in result
+
+    def test_detect_empty_transcript(self, detector_15min):
+        """Empty segments list should still work (uniform split fallback)."""
+        transcript = {"duration": 600.0, "segments": []}
+        with patch.object(detector_15min, "_call_llm", side_effect=Exception("API down")):
+            chapters = detector_15min.detect(transcript)
+        assert len(chapters) == 1
+        assert chapters[0].start_seconds == 0.0
+        assert abs(chapters[0].end_seconds - 600.0) < 0.01
+
+
+class TestSplitConfig:
+    """Tests for SplitConfig.from_env() environment variable parsing."""
+
+    def test_from_env_defaults(self):
+        """Default config when no env vars are set."""
+        with patch.dict(os.environ, {}, clear=True):
+            config = SplitConfig.from_env()
+        assert config.max_segment_duration == 15
+        assert config.resume is False
+        assert config.transcription_engine == "funasr"
+
+    def test_from_env_resume_true(self):
+        with patch.dict(os.environ, {"VIDEO_SPLITTER_RESUME": "1"}, clear=True):
+            config = SplitConfig.from_env()
+        assert config.resume is True
+
+    def test_from_env_resume_yes(self):
+        with patch.dict(os.environ, {"VIDEO_SPLITTER_RESUME": "yes"}, clear=True):
+            config = SplitConfig.from_env()
+        assert config.resume is True
+
+    def test_from_env_custom_engine(self):
+        with patch.dict(os.environ, {"VIDEO_SPLITTER_ENGINE": "whisper"}, clear=True):
+            config = SplitConfig.from_env()
+        assert config.transcription_engine == "whisper"
+
+    def test_from_env_api_key_overrides(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test", "WHALECLOUD_API_KEY": "whale-test"}, clear=True):
+            config = SplitConfig.from_env()
+        # WHALECLOUD_API_KEY should override OPENAI_API_KEY
+        assert config.llm_api_key == "whale-test"
+
+    def test_from_env_device_override(self):
+        with patch.dict(os.environ, {"VIDEO_SPLITTER_DEVICE": "cpu"}, clear=True):
+            config = SplitConfig.from_env()
+        assert config.device == "cpu"

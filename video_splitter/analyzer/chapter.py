@@ -86,10 +86,13 @@ class ChapterDetector:
         transcript_text = self._build_transcript_text(transcript)
         token_count = len(transcript_text) // 1.5  # rough estimate
 
-        if token_count <= self.config.llm_token_budget:
-            return self._single_detect(transcript_text, transcript["duration"])
-        else:
-            return self._chunked_detect(transcript_text, transcript["duration"])
+        try:
+            if token_count <= self.config.llm_token_budget:
+                return self._single_detect(transcript_text, transcript["duration"])
+            else:
+                return self._chunked_detect(transcript_text, transcript["duration"])
+        except Exception:
+            return self._uniform_split(transcript["duration"])
 
     def _build_transcript_text(self, transcript: Dict[str, Any]) -> str:
         segments = transcript.get("segments", [])
