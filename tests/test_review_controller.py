@@ -1,11 +1,10 @@
 """Unit tests for ReviewController — review state machine, transcript IO, and progress."""
 from __future__ import annotations
 
-import json
 import os
 import sys
 import tempfile
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 
 _PROJ_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, _PROJ_ROOT)
@@ -25,9 +24,7 @@ class TestLoadTranscript:
         ctrl = ReviewController()
         ctrl.progress_loaded = MagicMock()
         segments = _make_segments(5)
-        mock_content = json.dumps({"language": "zh", "duration": 25.0, "segments": segments})
         with (
-            patch("builtins.open", mock_open(read_data=mock_content)),
             patch("gui.controllers.review_controller.load_transcript", return_value={"segments": segments}),
             patch("video_splitter.review.filter_segments", return_value=segments),
             patch("gui.controllers.review_controller.load_progress", return_value=None),
@@ -41,9 +38,7 @@ class TestLoadTranscript:
         ctrl = ReviewController()
         ctrl.progress_loaded = MagicMock()
         segments = _make_segments(5)
-        mock_content = json.dumps({"language": "zh", "duration": 25.0, "segments": segments})
         with (
-            patch("builtins.open", mock_open(read_data=mock_content)),
             patch("gui.controllers.review_controller.load_transcript", return_value={"segments": segments}),
             patch("video_splitter.review.filter_segments", return_value=segments),
             patch("gui.controllers.review_controller.load_progress", return_value={"current_index": 3, "modified_count": 1}),
@@ -118,15 +113,14 @@ class TestNavigation:
 
 
 class TestSaveCorrection:
-    def test_saves_valid_correction(self):
+    def test_saves_valid_correction(self, tmp_path):
         ctrl = ReviewController()
         ctrl._segments = _make_segments(3)
-        ctrl._transcript_path = os.path.join(tempfile.gettempdir(), "test_transcript.json")
+        ctrl._transcript_path = str(tmp_path / "test_transcript.json")
         with (
             patch("gui.controllers.review_controller.sanitize_text", return_value="corrected text"),
             patch("gui.controllers.review_controller.save_transcript_atomic"),
             patch("gui.controllers.review_controller.save_progress"),
-            patch("builtins.open", mock_open()),
         ):
             ctrl.save_correction("corrected text", 0)
         assert ctrl._segments[0]["text"] == "corrected text"
@@ -149,11 +143,11 @@ class TestSaveCorrection:
 
 
 class TestEmitSegment:
-    def test_includes_modified_flag(self):
+    def test_includes_modified_flag(self, tmp_path):
         ctrl = ReviewController()
         ctrl.segment_changed = MagicMock()
         ctrl._segments = _make_segments(5)
-        ctrl._transcript_path = os.path.join(tempfile.gettempdir(), "test.json")
+        ctrl._transcript_path = str(tmp_path / "test.json")
         ctrl._current_index = 1
         ctrl._modified_indices = {2}  # current_index becomes 2 after next()
         with patch("gui.controllers.review_controller.save_progress"):
@@ -161,11 +155,11 @@ class TestEmitSegment:
         call_arg = ctrl.segment_changed.emit.call_args[0][0]
         assert call_arg["modified"] is True
 
-    def test_unmodified_segment(self):
+    def test_unmodified_segment(self, tmp_path):
         ctrl = ReviewController()
         ctrl.segment_changed = MagicMock()
         ctrl._segments = _make_segments(3)
-        ctrl._transcript_path = os.path.join(tempfile.gettempdir(), "test.json")
+        ctrl._transcript_path = str(tmp_path / "test.json")
         ctrl._modified_indices = set()
         ctrl._current_index = 0
         with patch("gui.controllers.review_controller.save_progress"):
@@ -175,12 +169,12 @@ class TestEmitSegment:
 
 
 class TestProgressPersistence:
-    def test_save_progress_contains_keys(self):
+    def test_save_progress_contains_keys(self, tmp_path):
         ctrl = ReviewController()
         ctrl._segments = _make_segments(5)
         ctrl._current_index = 2
         ctrl._modified_indices = {0, 2}
-        ctrl._transcript_path = os.path.join(tempfile.gettempdir(), "test_transcript.json")
+        ctrl._transcript_path = str(tmp_path / "test_transcript.json")
         with patch("gui.controllers.review_controller.save_progress") as mock_save:
             ctrl._save_progress()
         mock_save.assert_called_once()
@@ -190,11 +184,11 @@ class TestProgressPersistence:
 
 
 class TestExportSrt:
-    def test_writes_srt_file(self):
+    def test_writes_srt_file(self, tmp_path):
         ctrl = ReviewController()
         ctrl._segments = _make_segments(3)
-        ctrl._transcript_path = os.path.join(tempfile.gettempdir(), "test_transcript.json")
-        expected_srt = os.path.join(tempfile.gettempdir(), "test_transcript.srt")
+        ctrl._transcript_path = str(tmp_path / "test_transcript.json")
+        expected_srt = str(tmp_path / "test_transcript.srt")
         with (
             patch("gui.controllers.review_controller.to_srt") as mock_to_srt,
             patch("gui.controllers.review_controller.export_srt_path", return_value=expected_srt),
@@ -203,7 +197,7 @@ class TestExportSrt:
             patch("gui.controllers.review_controller.os.replace"),
             patch("gui.controllers.review_controller.os.unlink"),
         ):
-            mock_mkstemp.return_value = (99, os.path.join(tempfile.gettempdir(), "tmp_export.srt"))
+            mock_mkstemp.return_value = (99, str(tmp_path / "tmp_export.srt"))
             mock_f = MagicMock()
             mock_fdopen.return_value.__enter__.return_value = mock_f
             result = ctrl.export_srt()
