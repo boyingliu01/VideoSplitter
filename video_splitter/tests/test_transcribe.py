@@ -1,21 +1,25 @@
 """Tests for extractor/transcribe.py"""
+import os
 import sys
-import importlib
 
-sys.path.insert(0, r'E:\Private\skill开发\.worktrees\sprint\sprint-2026-06-02-01')
-transcribe_mod = importlib.import_module('video_splitter.extractor.transcribe')
+# Compute project root from this file's location
+_PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _PROJ_ROOT not in sys.path:
+    sys.path.insert(0, _PROJ_ROOT)
+
+from video_splitter.extractor.transcribe import estimate_tokens, to_srt, _format_timestamp  # noqa: E402
 
 
 class TestTokenEstimation:
     def test_estimate_chinese(self):
         transcript = {"segments": [{"text": "这是一段中文测试文本"}]}
-        tokens = transcribe_mod.estimate_tokens(transcript)
+        tokens = estimate_tokens(transcript)
         assert tokens > 0
         assert tokens <= 20
 
     def test_estimate_empty(self):
         transcript = {"segments": []}
-        tokens = transcribe_mod.estimate_tokens(transcript)
+        tokens = estimate_tokens(transcript)
         assert tokens == 0
 
     def test_estimate_multiple_segments(self):
@@ -26,7 +30,7 @@ class TestTokenEstimation:
                 {"text": "第三段内容"},
             ]
         }
-        tokens = transcribe_mod.estimate_tokens(transcript)
+        tokens = estimate_tokens(transcript)
         assert tokens > 0
         assert tokens <= 15
 
@@ -36,7 +40,7 @@ class TestTokenEstimation:
                 {"text": "This is a test transcript with English text."}
             ]
         }
-        tokens = transcribe_mod.estimate_tokens(transcript)
+        tokens = estimate_tokens(transcript)
         assert tokens > 0
 
 
@@ -48,7 +52,7 @@ class TestSRTGeneration:
                 {"text": "这是测试", "start": 2.5, "end": 5.0},
             ]
         }
-        srt = transcribe_mod.to_srt(transcript)
+        srt = to_srt(transcript)
         assert "00:00:00,000 --> 00:00:02,500" in srt
         assert "你好世界" in srt
         assert "这是测试" in srt
@@ -61,7 +65,7 @@ class TestSRTGeneration:
                 {"text": "C", "start": 2.0, "end": 3.0},
             ]
         }
-        srt = transcribe_mod.to_srt(transcript)
+        srt = to_srt(transcript)
         lines = srt.split("\n")
         assert lines[0] == "1"
         assert lines[4] == "2"
@@ -69,7 +73,7 @@ class TestSRTGeneration:
 
     def test_to_srt_empty_segments(self):
         transcript = {"segments": []}
-        srt = transcribe_mod.to_srt(transcript)
+        srt = to_srt(transcript)
         assert srt == ""
 
     def test_to_srt_ends_with_newline_pattern(self):
@@ -78,17 +82,17 @@ class TestSRTGeneration:
                 {"text": "Hello", "start": 0.0, "end": 1.0},
             ]
         }
-        srt = transcribe_mod.to_srt(transcript)
+        srt = to_srt(transcript)
         assert srt.endswith("\n")
 
     def test_timestamp_format_under_one_hour(self):
-        assert transcribe_mod._format_timestamp(65.5) == "00:01:05,500"
-        assert transcribe_mod._format_timestamp(0.0) == "00:00:00,000"
+        assert _format_timestamp(65.5) == "00:01:05,500"
+        assert _format_timestamp(0.0) == "00:00:00,000"
 
     def test_timestamp_format_over_one_hour(self):
-        assert transcribe_mod._format_timestamp(3661.0) == "01:01:01,000"
-        assert transcribe_mod._format_timestamp(7322.75) == "02:02:02,750"
+        assert _format_timestamp(3661.0) == "01:01:01,000"
+        assert _format_timestamp(7322.75) == "02:02:02,750"
 
     def test_timestamp_format_milliseconds(self):
-        assert transcribe_mod._format_timestamp(5.001) == "00:00:05,001"
-        assert transcribe_mod._format_timestamp(5.999) == "00:00:05,999"
+        assert _format_timestamp(5.001) == "00:00:05,001"
+        assert _format_timestamp(5.999) == "00:00:05,999"
