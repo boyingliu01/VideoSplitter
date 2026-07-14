@@ -116,3 +116,49 @@ class TestTranscribeWorker:
             mock_create.return_value = engine
             worker.run("test_audio.wav")
             mock_create.assert_called_once_with("whisper", worker._config)
+
+
+class TestTranscribeWorkerWithQThread:
+    """Integration tests: TranscribeWorker running in an actual QThread."""
+
+    def test_worker_in_qthread_emits_finished(self, mock_engine):
+        """Worker moved to QThread emits finished signal correctly."""
+        from PySide6.QtCore import QThread, QCoreApplication
+
+        app = QCoreApplication.instance()
+        if app is None:
+            app = QCoreApplication([])
+
+        worker = TranscribeWorker(engine_name="funasr")
+        thread = QThread()
+        worker.moveToThread(thread)
+
+        result = {"triggered": False}
+
+        def _on_finished(transcript):
+            result["triggered"] = True
+
+        worker.finished.connect(_on_finished)
+        thread.finished.connect(thread.quit)
+
+        # Patch directly on the module so it's visible from the worker thread
+        import gui.workers.transcribe_worker as tw
+        original_create_engine = tw.create_engine
+        tw.create_engine = lambda *a, **kw: mock_engine
+
+        try:
+            thread.started.connect(lambda: worker.run("test_audio.wav"))
+            thread.start()
+            # Process events until the worker thread finishes
+            import time
+            deadline = time.monotonic() + 5
+            while thread.isRunning() and time.monotonic() < deadline:
+                app.processEvents()
+                time.sleep(0.01)
+        finally:
+            if thread.isRunning():
+                thread.quit()
+                thread.wait(1000)
+            tw.create_engine = original_create_engine
+
+        assert result["triggered"], "finished signal was not emitted"

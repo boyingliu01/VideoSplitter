@@ -6,6 +6,8 @@ import sys
 import tempfile
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 _PROJ_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, _PROJ_ROOT)
 
@@ -141,6 +143,20 @@ class TestSaveCorrection:
             ctrl.save_correction("   ", 0)
         ctrl.error.emit.assert_called_once()
 
+    def test_save_correction_emits_error_on_atomic_save_failure(self, tmp_path):
+        """When save_transcript_atomic raises, error signal is emitted."""
+        ctrl = ReviewController()
+        ctrl.error = MagicMock()
+        ctrl._segments = _make_segments(3)
+        ctrl._transcript_path = str(tmp_path / "test_transcript.json")
+        with (
+            patch("gui.controllers.review_controller.sanitize_text", return_value="text"),
+            patch("gui.controllers.review_controller.save_transcript_atomic", side_effect=OSError("disk full")),
+        ):
+            ctrl.save_correction("text", 0)
+        ctrl.error.emit.assert_called_once()
+        assert "disk full" in ctrl.error.emit.call_args[0][0]
+
 
 class TestEmitSegment:
     def test_includes_modified_flag(self, tmp_path):
@@ -203,3 +219,20 @@ class TestExportSrt:
             result = ctrl.export_srt()
         assert result == expected_srt
         mock_to_srt.assert_called_once()
+
+    def test_export_srt_raises_on_write_error(self, tmp_path):
+        """export_srt re-raises OSError when file write fails."""
+        ctrl = ReviewController()
+        ctrl._segments = _make_segments(3)
+        ctrl._transcript_path = str(tmp_path / "test_transcript.json")
+        expected_srt = str(tmp_path / "test_transcript.srt")
+        with (
+            patch("gui.controllers.review_controller.to_srt"),
+            patch("gui.controllers.review_controller.export_srt_path", return_value=expected_srt),
+            patch("tempfile.mkstemp") as mock_mkstemp,
+            patch("gui.controllers.review_controller.os.fdopen", side_effect=OSError("permission denied")),
+            patch("gui.controllers.review_controller.os.unlink"),
+        ):
+            mock_mkstemp.return_value = (99, str(tmp_path / "tmp_export.srt"))
+            with pytest.raises(OSError, match="permission denied"):
+                ctrl.export_srt()
