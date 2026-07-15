@@ -113,6 +113,22 @@ class TestNavigation:
         result = ctrl.current_segment()
         assert result is None
 
+    def test_current_segment_past_end(self):
+        """current_segment returns None when index >= len(segments)."""
+        ctrl = ReviewController()
+        ctrl._segments = _make_segments(3)
+        ctrl._current_index = 5
+        result = ctrl.current_segment()
+        assert result is None
+
+    def test_current_segment_negative_index(self):
+        """current_segment returns None when index is negative."""
+        ctrl = ReviewController()
+        ctrl._segments = _make_segments(3)
+        ctrl._current_index = -1
+        result = ctrl.current_segment()
+        assert result is None
+
 
 class TestSaveCorrection:
     def test_saves_valid_correction(self, tmp_path):

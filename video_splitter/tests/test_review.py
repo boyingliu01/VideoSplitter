@@ -8,6 +8,8 @@ import importlib
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 review_mod = importlib.import_module("video_splitter.review")
 
@@ -157,6 +159,14 @@ class TestAtomicSave:
         loaded = json.loads(Path(path).read_text(encoding="utf-8"))
         assert loaded["segments"][0]["text"] == "second"
 
+    def test_atomic_save_replace_fails_cleanup(self, tmp_path):
+        """When os.replace fails, temp file is cleaned up in finally."""
+        transcript = _make_transcript([{"text": "data", "start": 0.0, "end": 1.0}])
+        path = str(tmp_path / "output.json")
+        with patch("os.replace", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                review_mod.save_transcript_atomic(path, transcript)
+
 
 # ─── ProgressFile ────────────────────────────────────────────────
 
@@ -183,6 +193,15 @@ class TestProgressFile:
         # Should have renamed corrupted file
         corrupted = video_path + ".review_progress.json.corrupted"
         assert os.path.exists(corrupted)
+
+    def test_load_progress_corrupted_rename_oserror(self, tmp_path):
+        """When rename fails with OSError, still returns None."""
+        video_path = str(tmp_path / "video.mp4")
+        prog_path = video_path + ".review_progress.json"
+        Path(prog_path).write_text("bad json", encoding="utf-8")
+        with patch("os.rename", side_effect=OSError("permission denied")):
+            result = review_mod.load_progress(video_path)
+        assert result is None
 
     def test_clear_progress(self, tmp_path):
         video_path = str(tmp_path / "video.mp4")
@@ -216,6 +235,157 @@ class TestFormatting:
         header = review_mod.format_segment_header(5, 20, 0, seg)
         assert "6/20" in header
         assert "0 changed" in header
+
+
+# ─── ExportSrtPath ────────────────────────────────────────────────
+
+class TestExportSrtPath:
+    def test_export_srt_path_from_transcript_json(self):
+        path = review_mod.export_srt_path("/videos/test.transcript.json")
+        assert path.endswith(".srt")
+        assert "transcript" not in path.rsplit(".", 1)[0].rsplit(".", 1)[-1]
+
+    def test_export_srt_path_simple(self):
+        path = review_mod.export_srt_path("video.transcript.json")
+        assert path.endswith(".srt")
+
+    def test_export_srt_path_nested(self):
+        path = review_mod.export_srt_path("/a/b/c/output.transcript.json")
+        expected = str(Path("/a/b/c/output.srt"))
+        assert str(path) == expected
+
+
+# ─── EdgeCases ────────────────────────────────────────────────────
+
+class TestEdgeCases:
+    def test_run_review_empty_segments(self, tmp_path):
+        """Zero segments: prints message and returns immediately."""
+        transcript = {"language": "zh", "duration": 0.0, "segments": []}
+        transcript_path = str(tmp_path / "empty.json")
+        Path(transcript_path).write_text(json.dumps(transcript), encoding="utf-8")
+
+        with patch("builtins.print"):
+            review_mod.run_review(
+                video_path=str(tmp_path / "video.mp4"),
+                transcript_path=transcript_path,
+            )
+
+    def test_run_review_auto_derive_transcript_path(self, tmp_path):
+        """Transcript path is auto-derived from video path."""
+        transcript = _make_transcript([{"text": "A", "start": 0.0, "end": 1.0}])
+        video_path = str(tmp_path / "video.mp4")
+        transcript_path = str(Path(video_path).with_suffix(".transcript.json"))
+        Path(transcript_path).write_text(json.dumps(transcript), encoding="utf-8")
+
+        with patch("builtins.input", side_effect=[":q"]):
+            with patch("builtins.print"):
+                review_mod.run_review(video_path=video_path)
+
+    def test_run_review_keyboard_interrupt(self, tmp_path):
+        """Ctrl+C saves progress."""
+        transcript = _make_transcript([{"text": "A", "start": 0.0, "end": 1.0}])
+        video_path = str(tmp_path / "video.mp4")
+        transcript_path = str(tmp_path / "transcript.json")
+        Path(transcript_path).write_text(json.dumps(transcript), encoding="utf-8")
+
+        with patch("builtins.input", side_effect=KeyboardInterrupt):
+            with patch("builtins.print"):
+                review_mod.run_review(
+                    video_path=video_path,
+                    transcript_path=transcript_path,
+                )
+
+        assert os.path.exists(video_path + ".review_progress.json")
+
+    def test_run_review_eof_error(self, tmp_path):
+        """EOFError (Ctrl+D) saves progress."""
+        transcript = _make_transcript([{"text": "A", "start": 0.0, "end": 1.0}])
+        video_path = str(tmp_path / "video.mp4")
+        transcript_path = str(tmp_path / "transcript.json")
+        Path(transcript_path).write_text(json.dumps(transcript), encoding="utf-8")
+
+        with patch("builtins.input", side_effect=EOFError):
+            with patch("builtins.print"):
+                review_mod.run_review(
+                    video_path=video_path,
+                    transcript_path=transcript_path,
+                )
+
+        assert os.path.exists(video_path + ".review_progress.json")
+
+    def test_run_review_help_command(self, tmp_path):
+        """:h shows help and continues."""
+        transcript = _make_transcript([{"text": "A", "start": 0.0, "end": 1.0}])
+        transcript_path = str(tmp_path / "transcript.json")
+        Path(transcript_path).write_text(json.dumps(transcript), encoding="utf-8")
+
+        with patch("builtins.input", side_effect=[":h", ":q"]):
+            with patch("builtins.print"):
+                review_mod.run_review(
+                    video_path=str(tmp_path / "video.mp4"),
+                    transcript_path=transcript_path,
+                )
+
+    def test_jump_invalid_number(self, tmp_path):
+        """:j with non-numeric target prints error."""
+        transcript = _make_transcript([{"text": "A", "start": 0.0, "end": 1.0}])
+        transcript_path = str(tmp_path / "transcript.json")
+        Path(transcript_path).write_text(json.dumps(transcript), encoding="utf-8")
+
+        printed = []
+        with patch("builtins.input", side_effect=[":j abc", ":q"]):
+            with patch("builtins.print", side_effect=lambda *a: printed.append(" ".join(str(x) for x in a))):
+                review_mod.run_review(
+                    video_path=str(tmp_path / "video.mp4"),
+                    transcript_path=transcript_path,
+                )
+        assert any("Invalid jump target" in p for p in printed)
+
+    def test_jump_out_of_range(self, tmp_path):
+        """:j with target 0 or >total prints error."""
+        transcript = _make_transcript([{"text": "A", "start": 0.0, "end": 1.0}])
+        transcript_path = str(tmp_path / "transcript.json")
+        Path(transcript_path).write_text(json.dumps(transcript), encoding="utf-8")
+
+        printed = []
+        with patch("builtins.input", side_effect=[":j 0", ":q"]):
+            with patch("builtins.print", side_effect=lambda *a: printed.append(" ".join(str(x) for x in a))):
+                review_mod.run_review(
+                    video_path=str(tmp_path / "video.mp4"),
+                    transcript_path=transcript_path,
+                )
+        assert any("Invalid segment" in p for p in printed)
+
+    def test_prev_at_first_segment(self, tmp_path):
+        """:p at first segment shows 'Already at first'."""
+        transcript = _make_transcript([{"text": "A", "start": 0.0, "end": 1.0}])
+        transcript_path = str(tmp_path / "transcript.json")
+        Path(transcript_path).write_text(json.dumps(transcript), encoding="utf-8")
+
+        printed = []
+        with patch("builtins.input", side_effect=[":p", ":q"]):
+            with patch("builtins.print", side_effect=lambda *a: printed.append(" ".join(str(x) for x in a))):
+                review_mod.run_review(
+                    video_path=str(tmp_path / "video.mp4"),
+                    transcript_path=transcript_path,
+                )
+        assert any("Already at first" in p for p in printed)
+
+    def test_empty_text_after_sanitize(self, tmp_path):
+        """User input that becomes empty after sanitize prints warning."""
+        transcript = _make_transcript([{"text": "original", "start": 0.0, "end": 1.0}])
+        transcript_path = str(tmp_path / "transcript.json")
+        Path(transcript_path).write_text(json.dumps(transcript), encoding="utf-8")
+
+        printed = []
+        # Input with only control characters → empty after sanitize
+        with patch("builtins.input", side_effect=["\x00\x01\x02", ":q"]):
+            with patch("builtins.print", side_effect=lambda *a: printed.append(" ".join(str(x) for x in a))):
+                review_mod.run_review(
+                    video_path=str(tmp_path / "video.mp4"),
+                    transcript_path=transcript_path,
+                )
+        assert any("empty after sanitization" in p for p in printed)
 
 
 # ─── Integration ─────────────────────────────────────────────────

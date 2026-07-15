@@ -159,3 +159,38 @@ class TestVideoCutter:
         with patch("subprocess.run", return_value=mock_result):
             duration = cutter._get_duration("/some/video.mp4")
         assert duration == 45.678
+
+    def test_cut_fast_duration_tolerance_fallback(self, tmp_path):
+        """Fast cut with duration outside tolerance falls back to precise."""
+        from video_splitter.splitter.cutter import VideoCutter
+
+        config = SplitConfig(cut_mode="fast", keyframe_tolerance=0.5)
+        cutter = VideoCutter(config)
+        cutter._cut_precise = MagicMock()
+        cutter._get_duration = MagicMock(return_value=32.0)  # 2s off from 30s expected
+
+        # Simulate ffmpeg success but duration mismatch
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        with patch("subprocess.run", return_value=mock_result):
+            cutter._cut_fast(str(tmp_path / "test.mp4"), str(tmp_path / "output" / "file.mp4"), 0.0, 30.0)
+
+        # Should fall back to precise because |32.0 - 30.0| > 0.5
+        cutter._cut_precise.assert_called_once()
+
+    def test_cut_fast_duration_within_tolerance(self, tmp_path):
+        """Fast cut with duration within tolerance does NOT fall back."""
+        from video_splitter.splitter.cutter import VideoCutter
+
+        config = SplitConfig(cut_mode="fast", keyframe_tolerance=2.0)
+        cutter = VideoCutter(config)
+        cutter._cut_precise = MagicMock()
+        cutter._get_duration = MagicMock(return_value=31.0)  # 1s off from 30s, tolerance=2
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        with patch("subprocess.run", return_value=mock_result):
+            cutter._cut_fast(str(tmp_path / "test.mp4"), str(tmp_path / "output" / "file.mp4"), 0.0, 30.0)
+
+        # Should NOT fall back because |31.0 - 30.0| <= 2.0
+        cutter._cut_precise.assert_not_called()

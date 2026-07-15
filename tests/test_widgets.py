@@ -74,6 +74,35 @@ class TestVideoPlayerWidget:
         player = VideoPlayerWidget()
         assert player._player.playbackState() == QMediaPlayer.PlaybackState.StoppedState
 
+    def test_play_changes_button_text(self, qapp):
+        from gui.widgets.video_player import VideoPlayerWidget
+        player = VideoPlayerWidget()
+        player.play()
+        assert player._play_pause_btn.text() == "\u23f8"
+
+    def test_pause_changes_button_text(self, qapp):
+        from gui.widgets.video_player import VideoPlayerWidget
+        player = VideoPlayerWidget()
+        player.play()
+        player.pause()
+        assert player._play_pause_btn.text() == "\u25b6"
+
+    def test_seek_to_calls_set_position(self, qapp):
+        from gui.widgets.video_player import VideoPlayerWidget
+        from unittest.mock import MagicMock
+        player = VideoPlayerWidget()
+        player._player.setPosition = MagicMock()
+        player.seek_to(5000)
+        player._player.setPosition.assert_called_once_with(5000)
+
+    def test_load_video_sets_source(self, qapp):
+        from gui.widgets.video_player import VideoPlayerWidget
+        from unittest.mock import MagicMock
+        player = VideoPlayerWidget()
+        player._player.setSource = MagicMock()
+        player.load_video("C:/test/video.mp4")
+        player._player.setSource.assert_called_once()
+
 
 class TestStatusBarWidget:
     """Smoke tests for StatusBarWidget."""
