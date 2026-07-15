@@ -28,6 +28,8 @@ class ReviewController(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._segments: list[dict] = []
+        self._duration: float = 0.0
+        self._language: str = ""
         self._current_index: int = 0
         self._modified_indices: set[int] = set()
         self._transcript_path: str = ""
@@ -38,6 +40,8 @@ class ReviewController(QObject):
 
         transcript = load_transcript(path)
         self._segments = transcript["segments"]
+        self._duration = transcript.get("duration", 0.0)
+        self._language = transcript.get("language", "")
 
         progress = load_progress(path) or {}
         self._current_index = progress.get("current_index", 0)
@@ -75,7 +79,11 @@ class ReviewController(QObject):
         self._segments[index]["text"] = sanitized
         self._modified_indices.add(index)
 
-        transcript = {"segments": self._segments}
+        transcript = {
+            "segments": self._segments,
+            "duration": self._duration,
+            "language": self._language,
+        }
         try:
             save_transcript_atomic(self._transcript_path, transcript)
             self._save_progress()
@@ -138,6 +146,29 @@ class ReviewController(QObject):
         self._save_progress()
         self.segment_changed.emit(data)
         return data
+
+    def set_duration(self, duration: float) -> None:
+        """Set the transcript duration (from VideoPlayerWidget).
+
+        Args:
+            duration: Total duration in seconds.
+        """
+        self._duration = duration
+
+    def get_transcript(self) -> dict:
+        """Return the in-memory corrected transcript with duration + segments.
+
+        Used by SplitController to get the user-corrected transcript
+        for chapter detection, without re-reading from disk.
+
+        Returns:
+            Dict with ``duration``, ``segments``, and ``language`` keys.
+        """
+        return {
+            "duration": self._duration,
+            "language": self._language,
+            "segments": list(self._segments),
+        }
 
     def _save_progress(self) -> None:
         save_progress(self._transcript_path, {
