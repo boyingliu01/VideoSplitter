@@ -145,3 +145,84 @@ class TestPipelineRun:
         assert result["status"] == "success"
         # chapter_detector.detect should NOT be called
         pipeline.chapter_detector.detect.assert_not_called()
+
+
+class TestPipelineDryRun:
+    """Tests for Pipeline.dry_run() — cost estimation without full pipeline."""
+
+    def test_dry_run_precheck_failure(self, config, tmp_path):
+        """Precheck failure returns error status."""
+        video_path = str(tmp_path / "test.mp4")
+        pipeline = Pipeline(config)
+        pipeline.audio.precheck = MagicMock(return_value=(False, "No audio detected"))
+
+        result = pipeline.dry_run(video_path)
+        assert result["status"] == "error"
+        assert "No audio detected" in result["message"]
+
+    def test_dry_run_success(self, config, tmp_path):
+        """Happy path: estimate tokens and cost."""
+        video_path = str(tmp_path / "test.mp4")
+        transcript = {
+            "language": "zh",
+            "duration": 600.0,
+            "segments": [{"text": "test", "start": 0.0, "end": 10.0}],
+        }
+
+        pipeline = Pipeline(config)
+        pipeline.audio.precheck = MagicMock(return_value=(True, "OK"))
+        pipeline.audio.extract = MagicMock(return_value="/tmp/test.wav")
+
+        with (
+            patch("video_splitter.pipeline.transcribe", return_value=transcript),
+            patch("video_splitter.pipeline.estimate_tokens", return_value=5000),
+        ):
+            result = pipeline.dry_run(video_path)
+
+        assert result["status"] == "ok"
+        assert result["duration_minutes"] == 10.0
+        assert result["estimated_tokens"] == 5000
+        assert "llm_calls" in result
+
+    def test_dry_run_chunked_when_over_budget(self, config, tmp_path):
+        """When tokens exceed budget, llm_calls shows 'multiple (chunked)'."""
+        video_path = str(tmp_path / "test.mp4")
+        transcript = {
+            "language": "zh",
+            "duration": 3600.0,
+            "segments": [{"text": "long transcript", "start": 0.0, "end": 3600.0}],
+        }
+
+        pipeline = Pipeline(config)
+        pipeline.audio.precheck = MagicMock(return_value=(True, "OK"))
+        pipeline.audio.extract = MagicMock(return_value="/tmp/test.wav")
+
+        # Token count > llm_token_budget (default 60000) triggers chunked
+        with (
+            patch("video_splitter.pipeline.transcribe", return_value=transcript),
+            patch("video_splitter.pipeline.estimate_tokens", return_value=100000),
+        ):
+            result = pipeline.dry_run(video_path)
+
+        assert result["llm_calls"] == "multiple (chunked)"
+
+    def test_dry_run_single_call_within_budget(self, config, tmp_path):
+        """When tokens within budget, llm_calls is 1."""
+        video_path = str(tmp_path / "test.mp4")
+        transcript = {
+            "language": "zh",
+            "duration": 300.0,
+            "segments": [],
+        }
+
+        pipeline = Pipeline(config)
+        pipeline.audio.precheck = MagicMock(return_value=(True, "OK"))
+        pipeline.audio.extract = MagicMock(return_value="/tmp/test.wav")
+
+        with (
+            patch("video_splitter.pipeline.transcribe", return_value=transcript),
+            patch("video_splitter.pipeline.estimate_tokens", return_value=1000),
+        ):
+            result = pipeline.dry_run(video_path)
+
+        assert result["llm_calls"] == 1

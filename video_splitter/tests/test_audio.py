@@ -1,6 +1,7 @@
 """Tests for extractor/audio.py — AudioExtractor with mocked subprocess."""
 import os
 import sys
+import numpy as np
 
 _PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _PROJ_ROOT not in sys.path:
@@ -11,6 +12,29 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from video_splitter.extractor.audio import AudioExtractor  # noqa: E402
+
+
+class TestAudioExtractorInit:
+    """Tests for AudioExtractor.__init__ — librosa detection."""
+
+    def test_librosa_available(self):
+        """When librosa is installed, has_librosa is True."""
+        extractor = AudioExtractor()
+        assert extractor.has_librosa is True
+
+    def test_librosa_not_available(self):
+        """When librosa import fails, has_librosa is False."""
+        import builtins
+        orig_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "librosa":
+                raise ImportError("No module named 'librosa'")
+            return orig_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=mock_import):
+            extractor = AudioExtractor()
+            assert extractor.has_librosa is False
 
 
 class TestAudioPrecheck:
@@ -75,6 +99,83 @@ class TestGetDuration:
         with patch("subprocess.run", return_value=mock_result):
             with pytest.raises(RuntimeError, match="ffprobe failed"):
                 extractor.get_duration(video_path)
+
+
+class TestPrecheckAudioAnalysis:
+    """Tests for the librosa-based audio analysis path in precheck()."""
+
+    def test_precheck_low_rms_returns_false(self, tmp_path):
+        """RMS < 0.001 returns (False, ...)."""
+        video_path = str(tmp_path / "test.mp4")
+        (tmp_path / "test.mp4").write_text("dummy")
+        extractor = AudioExtractor()
+        extractor.has_librosa = True
+
+        fake_y = np.zeros(16000, dtype=np.float32)  # silent → RMS ~0
+        ffprobe_result = MagicMock()
+        ffprobe_result.stdout = "1.0\n"
+
+        def fake_run(cmd, **kwargs):
+            if "ffprobe" in cmd[0]:
+                return ffprobe_result
+            return MagicMock(returncode=0)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            with patch("librosa.load", return_value=(fake_y, 16000)):
+                ok, msg = extractor.precheck(video_path)
+        assert ok is False
+        assert "RMS" in msg
+
+    def test_precheck_good_audio(self, tmp_path):
+        """Normal audio returns (True, OK message)."""
+        video_path = str(tmp_path / "test.mp4")
+        (tmp_path / "test.mp4").write_text("dummy")
+        extractor = AudioExtractor()
+        extractor.has_librosa = True
+
+        # Generate audio with amplitude 0.5 → RMS ~0.35
+        rng = np.random.default_rng(42)
+        fake_y = (rng.random(48000, dtype=np.float32) - 0.5) * 0.5
+
+        ffprobe_result = MagicMock()
+        ffprobe_result.stdout = "3.0\n"
+
+        def fake_run(cmd, **kwargs):
+            if "ffprobe" in cmd[0]:
+                return ffprobe_result
+            return MagicMock(returncode=0)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            with patch("librosa.load", return_value=(fake_y, 16000)):
+                ok, msg = extractor.precheck(video_path)
+        assert ok is True
+
+    def test_precheck_high_silence_warning(self, tmp_path):
+        """>90% silence returns (True, warning)."""
+        video_path = str(tmp_path / "test.mp4")
+        (tmp_path / "test.mp4").write_text("dummy")
+        extractor = AudioExtractor()
+        extractor.has_librosa = True
+
+        # 99% silence: one burst then all zeros
+        fake_y = np.zeros(48000, dtype=np.float32)
+        fake_y[:1000] = 0.5  # first 1000 samples loud, rest silent
+        # Normalize to have low enough RMS for silence ratio to trigger
+        # rms of full signal is low, but most frames near zero → silence ratio > 0.9
+
+        ffprobe_result = MagicMock()
+        ffprobe_result.stdout = "3.0\n"
+
+        def fake_run(cmd, **kwargs):
+            if "ffprobe" in cmd[0]:
+                return ffprobe_result
+            return MagicMock(returncode=0)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            with patch("librosa.load", return_value=(fake_y, 16000)):
+                ok, msg = extractor.precheck(video_path)
+        assert ok is True
+        assert "silence" in msg.lower()
 
 
 class TestExtract:
