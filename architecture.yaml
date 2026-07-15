@@ -8,3 +8,6 @@ layers:
   - name: ffmpeg_skill
     paths: ["ffmpeg-skill/**"]
     allowed_imports: [ffmpeg_skill]
+  - name: gui
+    paths: ["gui/**"]
+    allowed_imports: [gui, video_splitter, ffmpeg_skill]

@@ -1,4 +1,31 @@
 {
+  "commit": "8505e4819453a8ce821009d55667e00e4960e5d6",
+  "branch": "sprint/2026-07-15-01",
+  "timestamp": "2026-07-15T15:51:20Z",
+  "expires": "2026-07-15T16:51:20Z",
+  "verdict": "APPROVED",
+  "confidence": 9,
+  "experts": [
+    { "id": "Expert A (Architecture)", "verdict": "APPROVED", "confidence": 9 },
+    { "id": "Expert B (Implementation)", "verdict": "APPROVED", "confidence": 9 }
+  ],
+  "issues": [],
+  "issues_fixed_in_this_round": [
+    "C1: _on_boundary_moved non-atomic update — added SplitController.update_boundary()",
+    "C2: SplitWorker used VideoCutter private methods — added cut_single() public API",
+    "M1: Double signal connection chapters_detected + chapters_updated — removed duplicate",
+    "M2: save_correction lost duration/language metadata — now preserves in transcript",
+    "M3: Worker _cancelled thread safety undocumented — added docstring explanation",
+    "m1: QPolygon/QPoint imported inside paintEvent — moved to module level",
+    "m2: test_x_to_time had 'or True' no-op assertion — cleaned up",
+    "m3: chapters property shallow copy — changed to deep copy"
+  ],
+  "consensus_ratio": 1.0,
+  "files_reviewed": 15,
+  "lines_added": 2486,
+  "lines_deleted": 12
+}
+{
   "version": "1.0",
   "commit": "b497c95e71e60a0e8d9d19d1d9d6f0c861d65d83",
   "branch": "sprint/2026-07-13-04",
