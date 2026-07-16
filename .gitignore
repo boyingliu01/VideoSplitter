@@ -36,3 +36,11 @@ build/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Temp/one-off scripts and outputs
+_run_cert*.py
+_run_cert*.txt
+_bg_*.txt
+_pr_body.txt
+_trace*.txt
+.code-walkthrough-result.json

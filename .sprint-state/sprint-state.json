@@ -1,4 +1,52 @@
 {
+  "id": "sprint-2026-07-15-01",
+  "task_description": "GUI 主题拆分 Phase B — 一键 LLM 章节检测、可编辑章节列表、可视化时间轴、后台视频切割",
+  "phase": 1,
+  "status": "in_progress",
+  "started_at": "2026-07-15T00:00:00Z",
+  "isolation": {
+    "worktree_path": ".worktrees/sprint/sprint-2026-07-15-01",
+    "branch": "sprint/2026-07-15-01",
+    "created_from": "master",
+    "created_from_commit": "b2a0366"
+  },
+  "auto_estimate": {
+    "change_type": "新增功能",
+    "metrics": {
+      "new_files": 7,
+      "modified_files": 5,
+      "cross_module": ["gui", "video_splitter"],
+      "estimated_lines": 800
+    },
+    "estimated_level": "complex",
+    "recommended_flow": "完整 Sprint Flow (6 阶段)",
+    "risk_warnings": ["Timeline 自绘组件拖拽交互", "LLM 异步集成", "视频播放器集成"],
+    "user_decision": "accepted",
+    "override_reason": null
+  },
+  "open_issues": [
+    {
+      "number": 4,
+      "title": "GUI subtitle review: video player + interactive editing + topic splitting",
+      "state": "OPEN",
+      "labels": ["enhancement"],
+      "created_at": "2026-07-13T01:44:11Z"
+    }
+  ],
+  "phase_history": [
+    {
+      "phase": 1,
+      "phase_name": "PREP",
+      "status": "completed",
+      "started_at": "2026-07-15T00:00:00Z",
+      "completed_at": "2026-07-15T00:05:00Z",
+      "duration_seconds": 300
+    }
+  ],
+  "outputs": {},
+  "metrics": {}
+}
+{
   "id": "sprint-2026-07-13-04",
   "task_description": "GUI字幕校对修正功能 — 处理所有Open Issues，集中精力完成字幕校对修正GUI",
   "phase": 6,
