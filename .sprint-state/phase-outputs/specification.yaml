@@ -1,139 +1,116 @@
-# Video Splitter — Specification
-# Auto-generated from Delphi Review consensus (Round 2, 3/3 APPROVED)
-# 2026-06-02
+specification:
+  requirements:
+    - id: REQ-001
+      description: SplitController — 章节列表状态管理（中心数据源），Qt信号驱动，update_chapter/revalidate/export
+      priority: critical
+    - id: REQ-002
+      description: ChapterListWidget — 可编辑章节列表（QTableWidget），支持标题编辑/时间微调
+      priority: critical
+    - id: REQ-003
+      description: TimelineWidget — 自绘时间轴，显示章节分割线，支持拖拽调整边界（hitTest ±6px, 最小5秒）
+      priority: high
+    - id: REQ-004
+      description: SplitPanel — Split tab 主面板，组合章节列表+时间轴+检测/验证/拆分/取消按钮
+      priority: critical
+    - id: REQ-005
+      description: SplitWorker — 后台FFmpeg切割worker（QObject+moveToThread），段间cancel()
+      priority: critical
+    - id: REQ-006
+      description: DetectChaptersWorker — 后台LLM章节检测worker（QObject+moveToThread），由MainWindow管理生命周期
+      priority: critical
+    - id: REQ-007
+      description: app.py 集成 — 替换Split占位tab，持久化video_path，管理Worker生命周期，Review→Split数据流
+      priority: critical
+    - id: REQ-008
+      description: ReviewController 增强 — 存储duration，新增 get_transcript() 返回含 duration+segments 的完整 dict
+      priority: critical
+    - id: REQ-009
+      description: 测试覆盖 — SplitController + Split widgets + Workers 共30+测试
+      priority: high
+    - id: REQ-010
+      description: architecture.yaml 更新 — 添加gui层约束
+      priority: medium
 
-spec:
-  name: video-splitter
-  version: 0.1.0
-  language: python
-  delivery: standalone_cli
-  dependencies:
-    hard:
-      - ffmpeg-skill (local, import FFmpegSkill)
-      - faster-whisper (>=1.0.0)
-      - json-repair
-      - pydantic (>=2.0)
-      - librosa
-      - tqdm
-    external:
-      - ffmpeg (PATH)
-      - LLM API (DeepSeek-chat / OpenAI-compatible)
+  acceptance_criteria:
+    - id: AC-001
+      requirement: REQ-001
+      criteria: SplitController 接收 DetectChaptersWorker 的 chapters_detected 信号并存储章节列表
+      test_type: unit
+    - id: AC-002
+      requirement: REQ-001
+      criteria: update_chapter 边界检查正确（start<end, end-start>=5s, 不越界）
+      test_type: unit
+    - id: AC-003
+      requirement: REQ-001
+      criteria: SplitController 为中心数据源，Widget 通过 blockSignals(True) 在 set_chapters 时防循环
+      test_type: unit
+    - id: AC-004
+      requirement: REQ-002
+      criteria: ChapterListWidget 渲染章节列表，双击编辑标题 emit chapter_edited 信号
+      test_type: unit
+    - id: AC-005
+      requirement: REQ-003
+      criteria: TimelineWidget 绘制章节分割线，拖拽 emit boundary_moved，最小5秒约束
+      test_type: unit
+    - id: AC-006
+      requirement: REQ-004
+      criteria: SplitPanel 含检测/验证/拆分/取消按钮，章节列表，时间轴
+      test_type: unit
+    - id: AC-007
+      requirement: REQ-005
+      criteria: SplitWorker 后台切割，emit progress/finished/error，段间 cancel 中断
+      test_type: unit
+    - id: AC-008
+      requirement: REQ-006
+      criteria: DetectChaptersWorker 由 MainWindow 创建+管理QThread，emit chapters_detected/error
+      test_type: unit
+    - id: AC-009
+      requirement: REQ-007
+      criteria: Split tab 启用，video_path 持久化，Worker QThread 生命周期管理正确
+      test_type: integration
+    - id: AC-010
+      requirement: REQ-008
+      criteria: ReviewController.get_transcript() 返回 {"duration": float, "segments": list}，含修正内容
+      test_type: unit
+    - id: AC-011
+      requirement: REQ-009
+      criteria: 新增测试30+，全量测试通过，覆盖率>=75%
+      test_type: unit
+    - id: AC-012
+      requirement: REQ-005
+      criteria: SplitWorker 通过 progress_callback=lambda 桥接 VideoCutter 进度到 Qt Signal
+      test_type: unit
+    - id: AC-013
+      requirement: REQ-001
+      criteria: revalidate() 调用 ChapterValidator 重新对齐+合并过短章节
+      test_type: unit
 
-user_stories:
-  - id: US-001
-    story: 技术人员用一条命令把中文培训视频按主题拆成 ≤15min 短片段
-    acceptance:
-      - AC-001-01: 输入 mp4，执行 `video-splitter split video.mp4`，产出 {name}_segments/ 目录
-      - AC-001-02: 每个输出片段时长 ≤15 分钟，≥1 分钟
-      - AC-001-03: 片段名格式: {原文件名}_{序号}_{中文标题}.mp4
-      - AC-001-04: 标题不含 `/:*?"<>|` 等非法文件名字符
-
-  - id: US-002
-    story: LLM 分章失败时降级为等分，用户始终获得可用输出
-    acceptance:
-      - AC-002-01: LLM API 3 次重试失败后，自动按 15min 等分 + 编号命名
-      - AC-002-02: LLM 返回非法 JSON 时，json-repair 修复后重试
-      - AC-002-03: LLM 返回的 timecode 超出视频时长时，被过滤并提示
-      - AC-002-04: 降级模式下输出文件仍可用，无崩溃
-
-  - id: US-003
-    story: 长视频转录稿自动分块处理，不超 LLM token 限制
-    acceptance:
-      - AC-003-01: transcript ≤60K tokens 时单次 LLM 调用
-      - AC-003-02: transcript >60K tokens 时滑动窗口分块（每窗口 ~15min, 2min 重叠）
-      - AC-003-03: 多窗口结果合并后无重叠/间隙
-
-  - id: US-004
-    story: 断点续传——长视频处理中断后可跳过已完成步骤
-    acceptance:
-      - AC-004-01: `--resume` 检测已有 transcript.json → 跳过 Step 2
-      - AC-004-02: `--resume` 检测已有 chapters.json → 跳过 Step 3
-      - AC-004-03: 失败步骤保留部分产物，用户可手动修复后 `--resume`
-
-  - id: US-005
-    story: 依赖检查和硬件性能预估
-    acceptance:
-      - AC-005-01: `video-splitter check` 验证 Python deps、FFmpeg PATH、模型可用性
-      - AC-005-02: 输出 CPU/GPU 模式下预估转录速度
-      - AC-005-03: `--dry-run` 输出 LLM API 预估 token 用量和成本
-
-  - id: US-006
-    story: 音频质量预检避免无效处理
-    acceptance:
-      - AC-006-01: 静音比例 >90% → 警告但继续
-      - AC-006-02: 无声频 → fail-fast 并给出明确提示
-
-  - id: US-007
-    story: 切割精度控制
-    acceptance:
-      - AC-007-01: `--cut-mode fast`（默认）: stream copy, keyframe 偏移 >0.5s → 自动 precise fallback
-      - AC-007-02: `--cut-mode precise`: re-encode, 帧精确
-
-  - id: US-008
-    story: 批量处理多个视频
-    acceptance:
-      - AC-008-01: `video-splitter batch ./videos/` 依次处理每个 mp4
-      - AC-008-02: 处理结束后输出汇总报告（成功/失败数、总耗时）
-
-  - id: US-009
-    story: 转录副产品——从 transcript.json 生成 SRT 字幕
-    acceptance:
-      - AC-009-01: 每次 split 自动生成 .srt 文件
-      - AC-009-02: SRT 文件可被需求二的程序直接导入
-
-architecture:
-  pipeline:
-    - step: 0
-      name: precheck
-      module: extractor.audio
-      description: librosa RMS 音频质量检测
-    - step: 1
-      name: extract
-      module: extractor.audio
-      description: FFmpeg pipe 提取 16kHz mono，超 2h 用 temp file
-    - step: 2
-      name: transcribe
-      module: extractor.transcribe
-      description: faster-whisper 转录，输出 transcript.json
-    - step: 3
-      name: chapter
-      module: analyzer.chapter
-      description: LLM 分章（含 token 预算、chunking、retry、json-repair、fallback）
-    - step: 4
-      name: validate
-      module: analyzer.validator
-      description: 时长约束、边界对齐、命名规则、文件名清洗
-    - step: 5
-      name: cut
-      module: splitter.cutter
-      description: FFmpegSkill.cut() 切割（keyframe-aware, fast/precise 双模式）
-
-  modules:
-    - path: cli.py
-      role: argparse CLI 入口
-    - path: config.py
-      role: 配置管理（模型、API key、阈值、命名模板）
-    - path: pipeline.py
-      role: 编排 Step 0→5，处理 --resume/--dry-run
-    - path: extractor/audio.py
-      role: FFmpeg 音频提取 + librosa 预检
-    - path: extractor/transcribe.py
-      role: faster-whisper 转录 + transcript schema
-    - path: analyzer/chapter.py
-      role: LLM 分章（token预算/chunking/retry/json-repair/fallback）
-    - path: analyzer/validator.py
-      role: 约束检查 + 边界对齐 + 命名
-    - path: splitter/cutter.py
-      role: FFmpegSkill 切割封装
-
-errors:
-  - code: E001
-    description: FFmpeg not found in PATH
-  - code: E002
-    description: Video file does not exist or is corrupt
-  - code: E003
-    description: No detectable speech in audio
-  - code: E004
-    description: LLM API unreachable after 3 retries → fallback to uniform splits
-  - code: E005
-    description: LLM returned unrepairable JSON → fallback to uniform splits
+  design_decisions:
+    - id: DD-001
+      decision: LLM 检测通过 DetectChaptersWorker 在后台执行，FFmpeg 切割通过 SplitWorker 在后台执行
+      rationale: 避免阻塞主线程导致 UI 卡顿（LLM 调用可达 10-60 秒，FFmpeg 切割可达数分钟）
+      alternatives_considered: 直接在 SplitController 中同步调用（会阻塞 UI）
+    - id: DD-002
+      decision: SplitController 为中心数据源，Widget 编辑通过 Signal→Controller→broadcast 模式同步，blockSignals防循环
+      rationale: 防止 ChapterList↔Timeline 双向 Signal 循环
+      alternatives_considered: Widget 之间直接信号连接（容易死循环）
+    - id: DD-003
+      decision: TimelineWidget 使用 QWidget 自绘（paintEvent），hitTest ±6px 判定拖拽目标，最小章节5秒
+      rationale: 减少依赖，控制拖拽交互细节，防止过短章节
+      alternatives_considered: pyqtgraph（过重）
+    - id: DD-004
+      decision: ReviewController 存储 duration + segments，get_transcript() 暴露内存中修正版完整 transcript
+      rationale: SplitController 需要修正后的字幕+duration 进行章节检测
+      alternatives_considered: 从磁盘读取（会丢失 GUI 中未保存的修正）
+    - id: DD-005
+      decision: MainWindow 持久化 _current_video_path，管理所有 Worker 的 QThread 生命周期
+      rationale: 与 TranscribeWorker 一致的模式，video_path 是 Split 和 Output 的必要输入
+      alternatives_considered: Worker 自行管理线程（违反项目约定）
+    - id: DD-006
+      decision: Worker 支持 cancel()，段间检查 _cancelled 标志；FFmpeg 执行中不可取消（文档化限制）
+      rationale: 长视频切割可能耗时数分钟，用户需要取消能力；即时取消需 Popen+terminate 增加复杂度
+      alternatives_considered: Popen+terminate 即时取消（复杂度高，收益有限）
+    - id: DD-007
+      decision: "自动验证"按钮触发 SplitController.revalidate()，重新调用 ChapterValidator 对齐+合并
+      rationale: 用户手动编辑后可能需要重新对齐边界
+      alternatives_considered: 仅依赖 LLM 检测（不够灵活）
