@@ -52,6 +52,25 @@ class VideoCutter:
 
         return output_files
 
+    def cut_single(
+        self, video_path: str, out_path: str, start: float, end: float
+    ) -> None:
+        """Cut a single segment from the video.
+
+        Public API for external callers (e.g. GUI workers) that manage
+        their own loop and need per-segment control.
+
+        Args:
+            video_path: Path to the source video.
+            out_path: Path for the output segment file.
+            start: Start time in seconds.
+            end: End time in seconds.
+        """
+        if self.config.cut_mode == "precise":
+            self._cut_precise(video_path, out_path, start, end)
+        else:
+            self._cut_fast(video_path, out_path, start, end)
+
     def _cut_fast(self, video_path: str, out_path: str, start: float, end: float):
         duration = end - start
 
