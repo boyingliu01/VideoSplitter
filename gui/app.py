@@ -1,15 +1,15 @@
-"""MainWindow + application entry point for GUI subtitle review"""
+"""MainWindow + application entry point for GUI subtitle review and video splitting."""
 
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import Qt, QThread, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QLabel,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -17,9 +17,13 @@ from PySide6.QtWidgets import (
 )
 
 from gui.controllers.review_controller import ReviewController
+from gui.controllers.split_controller import SplitController
 from gui.widgets.status_bar import StatusBarWidget
 from gui.widgets.subtitle_panel import SubtitlePanel
+from gui.widgets.split_panel import SplitPanel
 from gui.widgets.video_player import VideoPlayerWidget
+from gui.workers.detect_worker import DetectChaptersWorker
+from gui.workers.split_worker import SplitWorker
 from gui.workers.transcribe_worker import TranscribeWorker
 from video_splitter.extractor.engines import FunASREngine
 
@@ -29,12 +33,25 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("VideoSplitter - Subtitle Review")
+        self.setWindowTitle("VideoSplitter - Subtitle Review & Split")
         self.resize(1280, 720)
 
+        self._current_video_path: str = ""
+
         self._controller = ReviewController(self)
+        self._split_controller = SplitController(parent=self)
+
+        # TranscribeWorker lifecycle
         self._worker: TranscribeWorker | None = None
         self._worker_thread: QThread | None = None
+
+        # DetectChaptersWorker lifecycle
+        self._detect_worker: DetectChaptersWorker | None = None
+        self._detect_thread: QThread | None = None
+
+        # SplitWorker lifecycle
+        self._split_worker: SplitWorker | None = None
+        self._split_thread: QThread | None = None
 
         self._build_menu()
         self._build_central()
@@ -58,6 +75,12 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        export_chapters_action = QAction("Export &Chapters...", self)
+        export_chapters_action.triggered.connect(self._on_export_chapters)
+        file_menu.addAction(export_chapters_action)
+
+        file_menu.addSeparator()
+
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence("Alt+F4"))
         exit_action.triggered.connect(self.close)
@@ -76,10 +99,8 @@ class MainWindow(QMainWindow):
         self._subtitle_panel = SubtitlePanel(self)
         self._tab_widget.addTab(self._subtitle_panel, "Review")
 
-        split_tab = QLabel("Split functionality coming in Phase B")
-        split_tab.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._tab_widget.addTab(split_tab, "Split")
-        self._tab_widget.setTabEnabled(1, False)
+        self._split_panel = SplitPanel(parent=self)
+        self._tab_widget.addTab(self._split_panel, "Split")
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(self._video_player)
@@ -108,6 +129,37 @@ class MainWindow(QMainWindow):
 
         ctrl.segment_changed.connect(self._on_segment_changed)
         ctrl.error.connect(self._on_controller_error)
+
+        # Video player duration → ReviewController
+        vp.duration_changed.connect(
+            lambda ms: self._controller.set_duration(ms / 1000.0)
+        )
+
+        # Split panel signals
+        sp = self._split_panel
+        sp.detect_requested.connect(self._on_detect_chapters)
+        sp.validate_requested.connect(self._split_controller.revalidate)
+        sp.split_requested.connect(self._on_start_split)
+        sp.cancel_requested.connect(self._on_cancel_operation)
+        sp.chapter_title_edited.connect(
+            lambda idx, title, s, e: self._split_controller.update_chapter(
+                idx, title=title
+            )
+        )
+        sp.chapter_remove_requested.connect(self._split_controller.remove_chapter)
+        sp.chapter_merge_requested.connect(self._split_controller.merge_chapters)
+        sp.boundary_moved.connect(self._on_boundary_moved)
+        sp.position_clicked.connect(
+            lambda t: self._video_player.seek_to(int(t * 1000))
+        )
+
+        # Split controller signals
+        sc = self._split_controller
+        sc.chapters_updated.connect(self._split_panel.set_chapters)
+        sc.chapters_exported.connect(
+            lambda p: self._status_bar_widget.set_status(f"Chapters exported: {p}")
+        )
+        sc.error.connect(self._on_split_error)
 
     def _setup_shortcuts(self) -> None:
         self._space_action = QAction(self)
@@ -163,7 +215,10 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        self._current_video_path = path
         self._video_player.load_video(path)
+        self._split_panel.set_video_path(path)
+        self._split_controller.set_video_path(path)
 
         self._worker = TranscribeWorker("funasr", parent=None)
         self._worker_thread = QThread(self)
@@ -216,6 +271,8 @@ class MainWindow(QMainWindow):
         secs = position_ms / 1000.0
         t = f"{int(secs // 60):02d}:{int(secs % 60):02d}"
         self._status_bar_widget.set_status(f"Position: {t}")
+        # Sync timeline position indicator
+        self._split_panel.set_current_position(secs)
 
     def _on_segment_changed(self, data: dict) -> None:
         self._subtitle_panel.set_segment(
@@ -238,6 +295,9 @@ class MainWindow(QMainWindow):
     def _on_transcribe_finished(self, transcript: dict) -> None:
         self._status_bar_widget.set_status("Transcription complete")
         self._cleanup_thread()
+        # Pass transcript to split controller for chapter detection
+        self._split_controller.set_transcript(transcript)
+        self._split_panel.set_duration(transcript.get("duration", 0.0))
 
     def _on_transcribe_error(self, msg: str) -> None:
         QMessageBox.warning(self, "Transcription Error", msg)
@@ -251,12 +311,168 @@ class MainWindow(QMainWindow):
             self._worker_thread = None
             self._worker = None
 
+    # -- Split workflow handlers -----------------------------------------------
+
+    def _on_detect_chapters(self) -> None:
+        """Start LLM chapter detection in a background thread."""
+        transcript = self._controller.get_transcript()
+        if not transcript.get("segments"):
+            QMessageBox.warning(
+                self, "No Transcript",
+                "Please load or transcribe a video first.",
+            )
+            return
+
+        self._split_controller.set_transcript(transcript)
+        self._split_panel.set_detecting(True)
+
+        self._detect_worker = DetectChaptersWorker(parent=None)
+        self._detect_thread = QThread(self)
+        self._detect_worker.moveToThread(self._detect_thread)
+
+        self._detect_worker.chapters_detected.connect(
+            self._on_chapters_detected
+        )
+        self._detect_worker.progress.connect(self._on_detect_progress)
+        self._detect_worker.error.connect(self._on_detect_error)
+
+        thread = self._detect_thread
+        thread.started.connect(
+            lambda: self._detect_worker.run(transcript)  # type: ignore[union-attr]
+        )
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+    def _on_chapters_detected(self, chapters: list) -> None:
+        """Receive detected chapters from worker and pass to controller."""
+        self._split_panel.set_detecting(False)
+        self._split_controller.receive_chapters(chapters)
+        self._status_bar_widget.set_status(
+            f"Detected {len(chapters)} chapters"
+        )
+        self._cleanup_detect_thread()
+
+    def _on_detect_progress(self, frac: float, desc: str) -> None:
+        self._status_bar_widget.set_status(f"Detecting: {desc} ({frac:.0%})")
+
+    def _on_detect_error(self, msg: str) -> None:
+        self._split_panel.set_detecting(False)
+        self._status_bar_widget.set_status(f"Detection failed: {msg}")
+        QMessageBox.warning(self, "Chapter Detection Error", msg)
+        self._cleanup_detect_thread()
+
+    def _cleanup_detect_thread(self) -> None:
+        if self._detect_thread is not None:
+            self._detect_thread.quit()
+            self._detect_thread.wait()
+            self._detect_thread = None
+            self._detect_worker = None
+
+    def _on_start_split(self, output_dir: str) -> None:
+        """Start FFmpeg video cutting in a background thread."""
+        if not self._current_video_path:
+            QMessageBox.warning(
+                self, "No Video",
+                "Please open a video file first.",
+            )
+            return
+
+        chapters = self._split_controller.chapters
+        if not chapters:
+            QMessageBox.warning(
+                self, "No Chapters",
+                "Please detect or create chapters first.",
+            )
+            return
+
+        self._split_panel.set_splitting(True)
+
+        self._split_worker = SplitWorker(parent=None)
+        self._split_thread = QThread(self)
+        self._split_worker.moveToThread(self._split_thread)
+
+        self._split_worker.progress.connect(self._on_split_progress)
+        self._split_worker.finished.connect(self._on_split_finished)
+        self._split_worker.error.connect(self._on_split_error)
+
+        thread = self._split_thread
+        thread.started.connect(
+            lambda: self._split_worker.run(  # type: ignore[union-attr]
+                self._current_video_path, chapters, output_dir
+            )
+        )
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+    def _on_split_progress(self, frac: float, desc: str) -> None:
+        self._status_bar_widget.set_status(f"Splitting: {desc} ({frac:.0%})")
+
+    def _on_split_finished(self, output_files: list) -> None:
+        self._split_panel.set_splitting(False)
+        self._status_bar_widget.set_status(
+            f"Split complete: {len(output_files)} segments"
+        )
+        self._cleanup_split_thread()
+
+        if output_files:
+            output_dir = str(Path(output_files[0]).parent)
+            result = QMessageBox.information(
+                self, "Split Complete",
+                f"Successfully created {len(output_files)} segments.\n\n"
+                f"Output: {output_dir}\n\n"
+                "Open output folder?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if result == QMessageBox.StandardButton.Yes:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(output_dir))
+
+    def _on_split_error(self, msg: str) -> None:
+        """Handle errors from detect or split workers."""
+        # Only reset the UI state for the operation that actually failed
+        if self._split_worker is not None:
+            self._split_panel.set_splitting(False)
+            self._cleanup_split_thread()
+        if self._detect_worker is not None:
+            self._split_panel.set_detecting(False)
+            self._cleanup_detect_thread()
+        self._status_bar_widget.set_status(f"Error: {msg}")
+        QMessageBox.warning(self, "Error", msg)
+
+    def _cleanup_split_thread(self) -> None:
+        if self._split_thread is not None:
+            self._split_thread.quit()
+            self._split_thread.wait()
+            self._split_thread = None
+            self._split_worker = None
+
+    def _on_cancel_operation(self) -> None:
+        """Cancel the current background operation."""
+        if self._detect_worker is not None:
+            self._detect_worker.cancel()
+            self._status_bar_widget.set_status("Cancelling detection...")
+        if self._split_worker is not None:
+            self._split_worker.cancel()
+            self._status_bar_widget.set_status("Cancelling split...")
+
+    def _on_boundary_moved(self, boundary_index: int, new_time: float) -> None:
+        """Handle timeline boundary drag — atomically update both adjacent chapters."""
+        self._split_controller.update_boundary(boundary_index, new_time)
+
+    def _on_export_chapters(self) -> None:
+        """Export chapters to JSON file."""
+        try:
+            path = self._split_controller.export_chapters()
+            self._status_bar_widget.set_status(f"Chapters exported: {path}")
+        except ValueError as exc:
+            QMessageBox.warning(self, "Export Error", str(exc))
+
     def _on_about(self) -> None:
         QMessageBox.about(
             self,
             "About VideoSplitter",
-            "VideoSplitter — Subtitle Review Tool\n\n"
-            "Phase A: ASR transcription + manual subtitle correction.",
+            "VideoSplitter — Subtitle Review & Split Tool\n\n"
+            "Phase A: ASR transcription + manual subtitle correction.\n"
+            "Phase B: LLM chapter detection + interactive splitting.",
         )
 
 
