@@ -22,6 +22,7 @@ from gui.widgets.status_bar import StatusBarWidget
 from gui.widgets.subtitle_panel import SubtitlePanel
 from gui.widgets.split_panel import SplitPanel
 from gui.widgets.video_player import VideoPlayerWidget
+from gui.workers.burn_worker import BurnWorker
 from gui.workers.detect_worker import DetectChaptersWorker
 from gui.workers.split_worker import SplitWorker
 from gui.workers.transcribe_worker import TranscribeWorker
@@ -52,6 +53,13 @@ class MainWindow(QMainWindow):
         # SplitWorker lifecycle
         self._split_worker: SplitWorker | None = None
         self._split_thread: QThread | None = None
+
+        # BurnWorker lifecycle
+        self._burn_worker: BurnWorker | None = None
+        self._burn_thread: QThread | None = None
+
+        # Track split output for subtitle burning
+        self._split_output_files: list[str] = []
 
         self._build_menu()
         self._build_central()
@@ -140,6 +148,7 @@ class MainWindow(QMainWindow):
         sp.detect_requested.connect(self._on_detect_chapters)
         sp.validate_requested.connect(self._split_controller.revalidate)
         sp.split_requested.connect(self._on_start_split)
+        sp.burn_requested.connect(self._on_burn_subtitles)
         sp.cancel_requested.connect(self._on_cancel_operation)
         sp.chapter_title_edited.connect(
             lambda idx, title, s, e: self._split_controller.update_chapter(
@@ -408,7 +417,8 @@ class MainWindow(QMainWindow):
         self._status_bar_widget.set_status(f"Splitting: {desc} ({frac:.0%})")
 
     def _on_split_finished(self, output_files: list) -> None:
-        self._split_panel.set_splitting(False)
+        self._split_output_files = output_files
+        self._split_panel.set_split_complete(output_files)
         self._status_bar_widget.set_status(
             f"Split complete: {len(output_files)} segments"
         )
@@ -438,6 +448,81 @@ class MainWindow(QMainWindow):
         self._status_bar_widget.set_status(f"Error: {msg}")
         QMessageBox.warning(self, "Error", msg)
 
+    # -- Subtitle burn workflow handlers ---------------------------------------
+
+    def _on_burn_subtitles(self) -> None:
+        """Start subtitle burning in a background thread."""
+        if not self._split_output_files:
+            QMessageBox.warning(
+                self, "No Segments",
+                "Please split the video first.",
+            )
+            return
+
+        transcript = self._controller.get_transcript()
+        if not transcript.get("segments"):
+            QMessageBox.warning(
+                self, "No Transcript",
+                "Please load or transcribe a video first.",
+            )
+            return
+
+        self._split_panel.set_burning(True)
+
+        self._burn_worker = BurnWorker(parent=None)
+        self._burn_thread = QThread(self)
+        self._burn_worker.moveToThread(self._burn_thread)
+
+        self._burn_worker.progress.connect(self._on_burn_progress)
+        self._burn_worker.finished.connect(self._on_burn_finished)
+        self._burn_worker.error.connect(self._on_burn_error)
+
+        thread = self._burn_thread
+        thread.started.connect(
+            lambda: self._burn_worker.run(  # type: ignore[union-attr]
+                self._split_output_files,
+                self._split_controller.chapters,
+                transcript["segments"],
+            )
+        )
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+    def _on_burn_progress(self, frac: float, desc: str) -> None:
+        self._status_bar_widget.set_status(f"Burning: {desc} ({frac:.0%})")
+
+    def _on_burn_finished(self, output_files: list) -> None:
+        self._split_panel.set_burning(False)
+        self._status_bar_widget.set_status(
+            f"Subtitle burn complete: {len(output_files)} segments"
+        )
+        self._cleanup_burn_thread()
+
+        if output_files:
+            output_dir = str(Path(output_files[0]).parent)
+            result = QMessageBox.information(
+                self, "Burn Complete",
+                f"Successfully burned subtitles into {len(output_files)} segments.\n\n"
+                f"Output: {output_dir}\n\n"
+                "Open output folder?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if result == QMessageBox.StandardButton.Yes:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(output_dir))
+
+    def _on_burn_error(self, msg: str) -> None:
+        self._split_panel.set_burning(False)
+        self._status_bar_widget.set_status(f"Burn error: {msg}")
+        QMessageBox.warning(self, "Burn Error", msg)
+        self._cleanup_burn_thread()
+
+    def _cleanup_burn_thread(self) -> None:
+        if self._burn_thread is not None:
+            self._burn_thread.quit()
+            self._burn_thread.wait()
+            self._burn_thread = None
+            self._burn_worker = None
+
     def _cleanup_split_thread(self) -> None:
         if self._split_thread is not None:
             self._split_thread.quit()
@@ -453,6 +538,9 @@ class MainWindow(QMainWindow):
         if self._split_worker is not None:
             self._split_worker.cancel()
             self._status_bar_widget.set_status("Cancelling split...")
+        if self._burn_worker is not None:
+            self._burn_worker.cancel()
+            self._status_bar_widget.set_status("Cancelling burn...")
 
     def _on_boundary_moved(self, boundary_index: int, new_time: float) -> None:
         """Handle timeline boundary drag — atomically update both adjacent chapters."""

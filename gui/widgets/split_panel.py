@@ -55,6 +55,7 @@ class SplitPanel(QWidget):
     detect_requested = Signal()
     validate_requested = Signal()
     split_requested = Signal(str)
+    burn_requested = Signal()
     cancel_requested = Signal()
     chapter_title_edited = Signal(int, str, float, float)
     chapter_remove_requested = Signal(int)
@@ -127,11 +128,19 @@ class SplitPanel(QWidget):
         self._split_btn.setEnabled(False)
         self._split_btn.clicked.connect(self._on_start_split)
 
+        self._burn_btn = QPushButton("Burn Subtitles", self)
+        self._burn_btn.setToolTip(
+            "Burn corrected subtitles into the split video segments"
+        )
+        self._burn_btn.setEnabled(False)
+        self._burn_btn.clicked.connect(self.burn_requested.emit)
+
         bottom_layout = QHBoxLayout()
         bottom_layout.addWidget(self._output_label)
         bottom_layout.addWidget(self._output_edit, stretch=1)
         bottom_layout.addWidget(self._browse_btn)
         bottom_layout.addWidget(self._split_btn)
+        bottom_layout.addWidget(self._burn_btn)
 
         # -- Main layout --
         main_layout = QVBoxLayout(self)
@@ -188,11 +197,30 @@ class SplitPanel(QWidget):
         """Toggle UI state during video splitting."""
         self._split_btn.setEnabled(not active)
         self._detect_btn.setEnabled(not active)
+        self._burn_btn.setEnabled(not active)
         self._cancel_btn.setEnabled(active)
         if active:
             self._split_btn.setText("Splitting...")
         else:
             self._split_btn.setText("Start Split")
+
+    def set_burning(self, active: bool) -> None:
+        """Toggle UI state during subtitle burning."""
+        self._burn_btn.setEnabled(not active)
+        self._split_btn.setEnabled(not active)
+        self._detect_btn.setEnabled(not active)
+        self._cancel_btn.setEnabled(active)
+        if active:
+            self._burn_btn.setText("Burning...")
+        else:
+            self._burn_btn.setText("Burn Subtitles")
+
+    def set_split_complete(self, segment_files: list) -> None:
+        """Enable burn button after successful split."""
+        self._split_btn.setEnabled(True)
+        self._burn_btn.setEnabled(len(segment_files) > 0)
+        self._detect_btn.setEnabled(True)
+        self._cancel_btn.setEnabled(False)
 
     def set_progress(self, frac: float, desc: str) -> None:
         """Update progress display (reuses status bar via parent)."""
