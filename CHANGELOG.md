@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 (2026-07-15)
+
+- Test coverage raised from 71% to 88.91% (424 tests, all passing)
+- New test_main_window.py: 38 tests covering MainWindow init, handlers, workflows
+- Extended tests for split widgets, subtitle burn, CLI, and chapter detector
+- Fixed all ruff lint warnings (F401, F841, F811)
+- pyproject.toml: coverage fail_under 50 → 80, added E402 ignore for test files
+
 ## 0.3.0 (2026-07-15)
 
 - Add subtitle burning feature: burn corrected subtitles into split video segments

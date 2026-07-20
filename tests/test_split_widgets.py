@@ -101,6 +101,53 @@ class TestChapterListWidget:
         result = ChapterListWidget._parse_timestamp_display("invalid")
         assert result == 0.0
 
+    def test_on_cell_changed_title_column(self, qapp):
+        """Editing title column emits chapter_edited signal."""
+        widget = ChapterListWidget()
+        chapters = _make_chapters(2)
+        widget.set_chapters(chapters)
+        results = []
+        widget.chapter_edited.connect(lambda *args: results.append(args))
+        # Simulate cell change in title column (1)
+        widget._on_cell_changed(0, 1)
+        assert len(results) == 1
+        assert results[0][0] == 0  # row index
+
+    def test_on_cell_changed_non_title_column(self, qapp):
+        """Editing non-title column is ignored."""
+        widget = ChapterListWidget()
+        widget.set_chapters(_make_chapters(2))
+        results = []
+        widget.chapter_edited.connect(lambda *args: results.append(args))
+        widget._on_cell_changed(0, 0)  # column 0 = # column
+        assert len(results) == 0
+
+    def test_on_context_menu_shows_menu(self, qapp):
+        """Right-click shows context menu with delete option."""
+        widget = ChapterListWidget()
+        widget.set_chapters(_make_chapters(3))
+        with patch("gui.widgets.chapter_list.QMenu") as MockMenu:
+            mock_menu = MockMenu.return_value
+            mock_menu.exec.return_value = None
+            mock_menu.addAction.return_value = MagicMock()
+            from PySide6.QtCore import QPoint
+            pos = QPoint(50, 20)
+            with patch.object(widget._table, "rowAt", return_value=0):
+                widget._on_context_menu(pos)
+            mock_menu.exec.assert_called_once()
+
+    def test_on_context_menu_negative_row(self, qapp):
+        """Right-click on empty area is ignored."""
+        widget = ChapterListWidget()
+        widget.set_chapters(_make_chapters(2))
+        with patch("gui.widgets.chapter_list.QMenu") as MockMenu:
+            mock_menu = MockMenu.return_value
+            from PySide6.QtCore import QPoint
+            pos = QPoint(50, 20)
+            with patch.object(widget._table, "rowAt", return_value=-1):
+                widget._on_context_menu(pos)
+            mock_menu.exec.assert_not_called()
+
 
 # =============================================================================
 # TimelineWidget tests
@@ -180,6 +227,145 @@ class TestTimelineWidget:
         result = widget._hit_test_boundary(50.0, 10, 180)
         assert result == -1
 
+    def test_x_to_time_zero_width(self, qapp):
+        widget = TimelineWidget()
+        widget._duration = 600.0
+        result = widget._x_to_time(50.0, 10, 0)
+        assert result == 0.0
+
+    def test_paint_empty_duration(self, qapp):
+        """paintEvent with no duration draws placeholder."""
+        widget = TimelineWidget()
+        widget.resize(400, 100)
+        widget.show()
+        # Should not crash
+        widget.repaint()
+
+    def test_paint_with_chapters(self, qapp):
+        """paintEvent with chapters draws timeline."""
+        widget = TimelineWidget()
+        widget.set_duration(180.0)
+        widget.set_chapters(_make_chapters(3))
+        widget.resize(400, 100)
+        widget.show()
+        widget.repaint()
+
+    def test_paint_with_position(self, qapp):
+        """paintEvent with current_position draws indicator."""
+        widget = TimelineWidget()
+        widget.set_duration(180.0)
+        widget.set_chapters(_make_chapters(3))
+        widget.set_current_position(90.0)
+        widget.resize(400, 100)
+        widget.show()
+        widget.repaint()
+
+    def test_paint_with_drag_preview(self, qapp):
+        """paintEvent with active drag shows preview line."""
+        widget = TimelineWidget()
+        widget.set_duration(180.0)
+        widget.set_chapters(_make_chapters(3))
+        widget._dragging_boundary = 0
+        widget._drag_preview_time = 75.0
+        widget.resize(400, 100)
+        widget.show()
+        widget.repaint()
+
+    def test_mouse_press_no_duration(self, qapp):
+        """mousePress with no duration is ignored."""
+        widget = TimelineWidget()
+        event = MagicMock()
+        event.position.return_value = MagicMock(x=MagicMock(return_value=50.0))
+        widget.mousePressEvent(event)  # should not crash
+
+    def test_mouse_press_click_seeks(self, qapp):
+        """mousePress in empty area emits position_clicked."""
+        widget = TimelineWidget()
+        widget.set_duration(180.0)
+        widget.set_chapters(_make_chapters(3))
+        widget.resize(200, 100)
+
+        results = []
+        widget.position_clicked.connect(lambda t: results.append(t))
+
+        event = MagicMock()
+        # Click far from any boundary
+        event.position.return_value = MagicMock(x=MagicMock(return_value=30.0))
+        widget.mousePressEvent(event)
+        assert len(results) == 1
+
+    def test_mouse_press_starts_drag(self, qapp):
+        """mousePress near boundary starts drag."""
+        widget = TimelineWidget()
+        widget.set_duration(180.0)
+        widget.set_chapters(_make_chapters(3))
+        widget.resize(200, 100)
+
+        bar_width = 200 - 10 - 10
+        boundary_x = 10 + int((60 / 180) * bar_width)
+
+        event = MagicMock()
+        event.position.return_value = MagicMock(x=MagicMock(return_value=float(boundary_x)))
+        widget.mousePressEvent(event)
+        assert widget._dragging_boundary == 0
+
+    def test_mouse_move_updates_drag(self, qapp):
+        """mouseMove during drag updates preview time."""
+        widget = TimelineWidget()
+        widget.set_duration(180.0)
+        widget.set_chapters(_make_chapters(3))
+        widget.resize(200, 100)
+        widget._dragging_boundary = 0
+
+        event = MagicMock()
+        event.position.return_value = MagicMock(x=MagicMock(return_value=100.0))
+        widget.mouseMoveEvent(event)
+        assert widget._drag_preview_time > 0
+
+    def test_mouse_move_cursor_feedback(self, qapp):
+        """mouseMove without drag changes cursor."""
+        widget = TimelineWidget()
+        widget.set_duration(180.0)
+        widget.set_chapters(_make_chapters(3))
+        widget.resize(200, 100)
+
+        event = MagicMock()
+        event.position.return_value = MagicMock(x=MagicMock(return_value=50.0))
+        widget.mouseMoveEvent(event)  # should not crash
+
+    def test_mouse_release_commits_drag(self, qapp):
+        """mouseRelease emits boundary_moved."""
+        widget = TimelineWidget()
+        widget.set_duration(180.0)
+        widget.set_chapters(_make_chapters(3))
+        widget._dragging_boundary = 0
+        widget._drag_preview_time = 75.0
+
+        results = []
+        widget.boundary_moved.connect(lambda idx, t: results.append((idx, t)))
+
+        event = MagicMock()
+        widget.mouseReleaseEvent(event)
+        assert len(results) == 1
+        assert results[0] == (0, 75.0)
+        assert widget._dragging_boundary == -1
+
+    def test_mouse_release_no_drag(self, qapp):
+        """mouseRelease without active drag is ignored."""
+        widget = TimelineWidget()
+        widget.set_duration(180.0)
+        widget.set_chapters(_make_chapters(3))
+        widget._dragging_boundary = -1
+
+        event = MagicMock()
+        widget.mouseReleaseEvent(event)  # should not crash
+
+    def test_mouse_move_no_duration(self, qapp):
+        """mouseMove with no duration is ignored."""
+        widget = TimelineWidget()
+        event = MagicMock()
+        widget.mouseMoveEvent(event)  # should not crash
+
 
 # =============================================================================
 # SplitPanel tests
@@ -245,6 +431,58 @@ class TestSplitPanel:
     def test_default_output_dir_empty(self):
         result = SplitPanel._default_output_dir("")
         assert result == ""
+
+    def test_set_burning_toggles_ui(self, qapp):
+        panel = SplitPanel()
+        panel.set_chapters(_make_chapters(1))
+        panel.set_burning(True)
+        assert not panel._burn_btn.isEnabled()
+        assert not panel._split_btn.isEnabled()
+        assert panel._cancel_btn.isEnabled()
+        assert "Burning" in panel._burn_btn.text()
+
+        panel.set_burning(False)
+        assert "Burn Subtitles" in panel._burn_btn.text()
+
+    def test_set_split_complete_enables_burn(self, qapp):
+        panel = SplitPanel()
+        panel.set_split_complete(["seg1.mp4", "seg2.mp4"])
+        assert panel._burn_btn.isEnabled()
+        assert panel._split_btn.isEnabled()
+        assert panel._detect_btn.isEnabled()
+        assert not panel._cancel_btn.isEnabled()
+
+    def test_set_split_complete_empty_no_burn(self, qapp):
+        panel = SplitPanel()
+        panel.set_split_complete([])
+        assert not panel._burn_btn.isEnabled()
+
+    def test_set_duration_delegates_to_timeline(self, qapp):
+        panel = SplitPanel()
+        panel.set_duration(300.0)
+        assert panel._timeline._duration == 300.0
+
+    def test_set_current_position_delegates(self, qapp):
+        panel = SplitPanel()
+        panel.set_duration(300.0)
+        panel.set_current_position(150.0)
+        assert panel._timeline._current_position == 150.0
+
+    def test_on_start_split_emits_signal(self, qapp):
+        panel = SplitPanel()
+        panel._output_edit.setText("/tmp/output")
+        results = []
+        panel.split_requested.connect(lambda d: results.append(d))
+        panel._on_start_split()
+        assert len(results) == 1
+
+    def test_on_browse_output_no_selection(self, qapp):
+        panel = SplitPanel()
+        with patch("gui.widgets.split_panel.QFileDialog") as MockDlg:
+            MockDlg.getExistingDirectory.return_value = ""
+            panel._on_browse_output()
+        # Output dir should not change
+        assert panel.output_dir() == ""
 
 
 # =============================================================================

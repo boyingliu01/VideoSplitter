@@ -234,3 +234,32 @@ class TestBurnWorker:
 
         assert len(errors) == 1
         assert "FFmpeg failed" in errors[0]
+
+    @patch("gui.workers.burn_worker.SubtitleBurner")
+    def test_run_cancelled_midway(self, MockBurner):
+        """Cancel between segments stops processing."""
+        from gui.workers.burn_worker import BurnWorker
+
+        mock_instance = MockBurner.return_value
+        call_count = [0]
+
+        def fake_burn(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                worker.cancel()
+            return ["out.mp4"]
+
+        mock_instance.burn.side_effect = fake_burn
+
+        worker = BurnWorker()
+        finished_results = []
+        worker.finished.connect(lambda files: finished_results.extend(files))
+
+        chapters = [
+            {"start_seconds": 0, "end_seconds": 10},
+            {"start_seconds": 10, "end_seconds": 20},
+            {"start_seconds": 20, "end_seconds": 30},
+        ]
+        worker.run(["s1.mp4", "s2.mp4", "s3.mp4"], chapters, [])
+        # Should have stopped after first segment
+        assert len(finished_results) <= 2
