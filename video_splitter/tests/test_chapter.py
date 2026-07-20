@@ -1,7 +1,7 @@
 """Tests for analyzer/chapter.py"""
 import os
 import sys
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -278,7 +278,7 @@ class TestCallLLM:
 
     def test_call_llm_success_first_attempt(self, detector_15min):
         """First attempt succeeds, no retries."""
-        fake_chapters = [Chapter("01_ok", 0.0, 60.0)]
+        [Chapter("01_ok", 0.0, 60.0)]
         fake_response = '[{"title": "01_ok", "start": "00:00:00", "end": "00:01:00"}]'
         with patch.object(detector_15min, "_llm_request", return_value=fake_response):
             chapters = detector_15min._call_llm("prompt", 60.0)
@@ -345,3 +345,176 @@ class TestSplitConfig:
         with patch.dict(os.environ, {"VIDEO_SPLITTER_DEVICE": "cpu"}, clear=True):
             config = SplitConfig.from_env()
         assert config.device == "cpu"
+
+
+class TestLLMRequest:
+    """Tests for ChapterDetector._llm_request() with mocked OpenAI client."""
+
+    def test_llm_request_success(self, detector_15min):
+        """_llm_request returns raw text from OpenAI response."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(message=MagicMock(content='[{"title":"test","start":"00:00","end":"01:00"}]'))
+        ]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        with patch.dict(sys.modules, {"openai": MagicMock(OpenAI=MagicMock(return_value=mock_client))}):
+            result = detector_15min._llm_request("test prompt")
+        assert "title" in result
+
+    def test_llm_request_with_system_prompt(self, detector_15min):
+        """_llm_request sends system and user messages."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="[]"))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        with patch.dict(sys.modules, {"openai": MagicMock(OpenAI=MagicMock(return_value=mock_client))}):
+            detector_15min._llm_request("analyze this")
+        call_args = mock_client.chat.completions.create.call_args
+        messages = call_args[1]["messages"] if "messages" in call_args[1] else call_args[0][0]
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+
+
+class TestUniformSplitExtended:
+    """Extended tests for ChapterDetector._uniform_split() fallback."""
+
+    def test_uniform_split_basic(self, detector_15min):
+        chapters = detector_15min._uniform_split(900.0)
+        assert len(chapters) >= 1
+        assert chapters[0].start_seconds == 0.0
+        assert chapters[-1].end_seconds <= 900.0
+
+    def test_uniform_split_short_video(self, detector_15min):
+        chapters = detector_15min._uniform_split(30.0)
+        assert len(chapters) == 1
+        assert chapters[0].end_seconds == 30.0
+
+    def test_uniform_split_long_video(self, detector_15min):
+        chapters = detector_15min._uniform_split(7200.0)
+        assert len(chapters) > 1
+        # All chapters should be contiguous
+        for i in range(len(chapters) - 1):
+            assert abs(chapters[i].end_seconds - chapters[i + 1].start_seconds) < 0.01
+
+    def test_uniform_split_titles_numbered(self, detector_15min):
+        chapters = detector_15min._uniform_split(3600.0)
+        for i, ch in enumerate(chapters):
+            assert str(i + 1).zfill(2) in ch.title
+
+
+class TestTimestampHelpers:
+    """Tests for module-level timestamp conversion functions."""
+
+    def test_seconds_to_timestamp_under_hour(self):
+        from video_splitter.analyzer.chapter import _seconds_to_timestamp
+        result = _seconds_to_timestamp(125.5)
+        assert result.startswith("02:")
+        assert "05.500" in result
+
+    def test_seconds_to_timestamp_over_hour(self):
+        from video_splitter.analyzer.chapter import _seconds_to_timestamp
+        result = _seconds_to_timestamp(3661.0)
+        assert result.startswith("01:")
+        assert "01:01.000" in result
+
+    def test_seconds_to_timestamp_zero(self):
+        from video_splitter.analyzer.chapter import _seconds_to_timestamp
+        result = _seconds_to_timestamp(0.0)
+        assert result == "00:00.000"
+
+    def test_parse_timestamp_hms(self):
+        from video_splitter.analyzer.chapter import _parse_timestamp
+        result = _parse_timestamp("01:30:00")
+        assert result == 5400.0
+
+    def test_parse_timestamp_ms(self):
+        from video_splitter.analyzer.chapter import _parse_timestamp
+        result = _parse_timestamp("05:30")
+        assert result == 330.0
+
+    def test_parse_timestamp_with_milliseconds(self):
+        from video_splitter.analyzer.chapter import _parse_timestamp
+        result = _parse_timestamp("00:01:30.500")
+        assert abs(result - 90.5) < 0.01
+
+    def test_parse_timestamp_comma_decimal(self):
+        from video_splitter.analyzer.chapter import _parse_timestamp
+        result = _parse_timestamp("00:01,500")
+        assert abs(result - 1.5) < 0.01
+
+    def test_parse_timestamp_invalid_raises(self):
+        from video_splitter.analyzer.chapter import _parse_timestamp
+        with pytest.raises(ValueError, match="Invalid timestamp"):
+            _parse_timestamp("invalid")
+
+
+class TestChunkedDetect:
+    """Tests for ChapterDetector._chunked_detect() — sliding window."""
+
+    def test_chunked_detect_short_transcript(self, detector_15min):
+        """Short transcript → single chunk."""
+        transcript_text = "[00:00:00] 第一段内容\n[00:05:00] 第二段内容\n[00:10:00] 第三段内容"
+        fake_response = '[{"title": "01_测试", "start": "00:00:00", "end": "00:10:00"}]'
+        with patch.object(detector_15min, "_llm_request", return_value=fake_response):
+            chapters = detector_15min._chunked_detect(transcript_text, 600.0)
+        assert len(chapters) >= 1
+
+    def test_detect_routes_to_chunked(self, detector_15min):
+        """Long transcript routes through _chunked_detect."""
+        # Create a transcript that exceeds the token budget
+        segments = [
+            {"text": f"segment {i}", "start": float(i * 60), "end": float((i + 1) * 60)}
+            for i in range(100)
+        ]
+        transcript = {"duration": 6000.0, "segments": segments}
+        fake_response = '[{"title": "01_测试", "start": "00:00:00", "end": "00:15:00"}]'
+        with patch.object(detector_15min, "_llm_request", return_value=fake_response):
+            chapters = detector_15min.detect(transcript)
+        assert len(chapters) >= 1
+
+    def test_detect_fallback_on_exception(self, detector_15min):
+        """detect() falls back to uniform split on any exception."""
+        transcript = {"duration": 300.0, "segments": [{"text": "hi", "start": 0, "end": 5}]}
+        with patch.object(detector_15min, "_single_detect", side_effect=RuntimeError("boom")):
+            chapters = detector_15min.detect(transcript)
+        assert len(chapters) >= 1
+
+
+class TestParseResponseEdgeCases:
+    """Additional _parse_response edge cases."""
+
+    def test_parse_with_json_repair(self, detector_15min):
+        """json_repair fixes malformed JSON."""
+        raw = '[{"title": "01_测试", "start": "00:00:00", "end": "00:05:00"}]'
+        # repair_json is called but the input is already valid
+        with patch("video_splitter.analyzer.chapter.HAS_JSON_REPAIR", True):
+            with patch("video_splitter.analyzer.chapter.repair_json", side_effect=lambda x: x):
+                chapters = detector_15min._parse_response(raw, 300.0)
+                assert len(chapters) == 1
+
+    def test_parse_auto_title_when_missing(self, detector_15min):
+        """Missing title field gets auto-generated."""
+        raw = '[{"start": "00:00:00", "end": "00:05:00"}]'
+        chapters = detector_15min._parse_response(raw, 300.0)
+        assert "片段" in chapters[0].title or "1" in chapters[0].title
+
+    def test_parse_strips_illegal_chars(self, detector_15min):
+        """Illegal filename characters are stripped from titles."""
+        raw = '[{"title": "01_测试/<>:非法", "start": "00:00:00", "end": "00:05:00"}]'
+        chapters = detector_15min._parse_response(raw, 300.0)
+        assert "/" not in chapters[0].title
+        assert "<" not in chapters[0].title
+
+    def test_parse_not_a_list_raises(self, detector_15min):
+        raw = '{"title": "single"}'
+        with pytest.raises(ValueError, match="Expected JSON array"):
+            detector_15min._parse_response(raw, 300.0)
+
+    def test_parse_timecode_out_of_range(self, detector_15min):
+        raw = '[{"title": "t", "start": "00:00:00", "end": "99:00:00"}]'
+        with pytest.raises(ValueError, match="Timecode out of range"):
+            detector_15min._parse_response(raw, 300.0)

@@ -9,7 +9,6 @@ if _PROJ_ROOT not in sys.path:
 import argparse
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from video_splitter.cli import cmd_split, cmd_transcribe, cmd_cut, cmd_review, cmd_gui  # noqa: E402
 
@@ -145,3 +144,138 @@ class TestCmdGui:
         with patch("gui.app.main") as mock_gui_main:
             cmd_gui(args)
         mock_gui_main.assert_called_once()
+
+    def test_cmd_gui_import_error(self):
+        args = argparse.Namespace()
+        with patch.dict("sys.modules", {"gui.app": None, "gui": None}):
+            import pytest
+            with pytest.raises(SystemExit):
+                cmd_gui(args)
+
+
+class TestCmdCheck:
+    """Tests for cmd_check — dependency validation."""
+
+    def test_cmd_check_ffmpeg_missing(self, capsys):
+        from video_splitter.cli import cmd_check
+        args = argparse.Namespace()
+        with (
+            patch("subprocess.run", side_effect=FileNotFoundError),
+            patch.dict("os.environ", {}, clear=True),
+            patch.dict("sys.modules", {"faster_whisper": None}),
+        ):
+            cmd_check(args)
+        captured = capsys.readouterr()
+        assert "FAIL" in captured.out
+
+
+class TestCmdBatch:
+    """Tests for cmd_batch — multi-video processing."""
+
+    def test_cmd_batch_no_files(self, capsys):
+        from video_splitter.cli import cmd_batch
+        args = argparse.Namespace(dir="/nonexistent", max_duration=15, resume=False)
+        with patch("glob.glob", return_value=[]):
+            cmd_batch(args)
+        captured = capsys.readouterr()
+        assert "No .mp4 files" in captured.out
+
+    def test_cmd_batch_success(self, capsys):
+        from video_splitter.cli import cmd_batch
+        args = argparse.Namespace(dir="/tmp/videos", max_duration=15, resume=False)
+        with (
+            patch("glob.glob", return_value=["/tmp/videos/a.mp4"]),
+            patch("video_splitter.cli.Pipeline") as MockPipeline,
+        ):
+            mock_pipeline = MagicMock()
+            mock_pipeline.run.return_value = {
+                "output_files": ["seg1.mp4"],
+                "status": "success",
+            }
+            MockPipeline.return_value = mock_pipeline
+            cmd_batch(args)
+        captured = capsys.readouterr()
+        assert "Batch Complete" in captured.out
+        assert "OK: 1" in captured.out
+
+    def test_cmd_batch_error(self, capsys):
+        from video_splitter.cli import cmd_batch
+        args = argparse.Namespace(dir="/tmp/videos", max_duration=15, resume=False)
+        with (
+            patch("glob.glob", return_value=["/tmp/videos/bad.mp4"]),
+            patch("video_splitter.cli.Pipeline") as MockPipeline,
+        ):
+            mock_pipeline = MagicMock()
+            mock_pipeline.run.side_effect = RuntimeError("FFmpeg missing")
+            MockPipeline.return_value = mock_pipeline
+            cmd_batch(args)
+        captured = capsys.readouterr()
+        assert "Failed: 1" in captured.out
+
+
+class TestMainParser:
+    """Tests for main() parser and dispatch."""
+
+    def test_main_split_dispatch(self):
+        from video_splitter.cli import main
+        with patch("sys.argv", ["cli.py", "split", "test.mp4"]):
+            with patch("video_splitter.cli.cmd_split") as mock_cmd:
+                main()
+                mock_cmd.assert_called_once()
+
+    def test_main_check_dispatch(self):
+        from video_splitter.cli import main
+        with patch("sys.argv", ["cli.py", "check"]):
+            with patch("video_splitter.cli.cmd_check") as mock_cmd:
+                main()
+                mock_cmd.assert_called_once()
+
+    def test_main_gui_dispatch(self):
+        from video_splitter.cli import main
+        with patch("sys.argv", ["cli.py", "gui"]):
+            with patch("video_splitter.cli.cmd_gui") as mock_cmd:
+                main()
+                mock_cmd.assert_called_once()
+
+    def test_main_batch_dispatch(self):
+        from video_splitter.cli import main
+        with patch("sys.argv", ["cli.py", "batch", "/tmp/vids"]):
+            with patch("video_splitter.cli.cmd_batch") as mock_cmd:
+                main()
+                mock_cmd.assert_called_once()
+
+    def test_cmd_split_with_model_override(self):
+        from video_splitter.cli import cmd_split
+        args = argparse.Namespace(
+            video="test.mp4", max_duration=10, model="tiny",
+            cut_mode="precise", resume=True, dry_run=False,
+        )
+        with patch("video_splitter.cli.Pipeline") as MockP:
+            mock_p = MagicMock()
+            mock_p.run.return_value = {
+                "video": "test.mp4", "status": "ok",
+                "output_files": [], "elapsed_seconds": 1.0,
+            }
+            MockP.return_value = mock_p
+            cmd_split(args)
+        config = MockP.call_args[0][0]
+        assert config.model_size == "tiny"
+        assert config.cut_mode == "precise"
+
+    def test_cmd_split_with_srt_output(self, capsys):
+        from video_splitter.cli import cmd_split
+        args = argparse.Namespace(
+            video="test.mp4", max_duration=15, model=None,
+            cut_mode=None, resume=False, dry_run=False,
+        )
+        with patch("video_splitter.cli.Pipeline") as MockP:
+            mock_p = MagicMock()
+            mock_p.run.return_value = {
+                "video": "test.mp4", "status": "ok",
+                "output_files": ["/tmp/01.mp4"], "elapsed_seconds": 1.0,
+                "srt_file": "/tmp/test.srt",
+            }
+            MockP.return_value = mock_p
+            cmd_split(args)
+        captured = capsys.readouterr()
+        assert "SRT:" in captured.out
