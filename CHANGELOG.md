@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 (2026-07-20)
+
+- Improve GUI startup responsiveness: move FunASR health check to background thread
+- Add wait cursor and status bar feedback when loading video files
+- Tests: 449 passed, all clean
+
 ## 0.5.0 (2026-07-20)
 
 - Fix critical GUI wiring bugs: transcription result now correctly populates subtitle panel
