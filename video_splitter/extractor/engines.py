@@ -270,21 +270,19 @@ class FunASREngine(TranscriptionEngine):
         """Extract segment list from a FunASR generate() result.
 
         Handles multiple FunASR result formats:
-        - sentence_info list (timestamp-aware models)
-        - direct text field (non-timestamp models)
-        - timestamp list with text
+        - Format A: sentence_info list (some model versions)
+        - Format B: text + timestamp (Paraformer in FunASR 1.3.x)
+          text is space-separated words, timestamp is [[start_ms, end_ms], ...]
         """
         if not isinstance(result, list) or len(result) == 0:
-            logger.warning("[DIAG] FunASR result is not a non-empty list: type=%s, len=%s",
-                          type(result).__name__, len(result) if isinstance(result, list) else "N/A")
+            logger.warning("FunASR result is empty or not a list")
             return []
 
         first = result[0] if isinstance(result[0], dict) else {}
-        logger.info("[DIAG] FunASR result[0] keys: %s", list(first.keys()))
 
         segments: List[Dict[str, Any]] = []
 
-        # Format 1: sentence_info (timestamp-aware models like Paraformer)
+        # Format A: sentence_info (some model versions)
         sentence_info = first.get("sentence_info")
         if sentence_info:
             for item in sentence_info:
@@ -296,43 +294,88 @@ class FunASREngine(TranscriptionEngine):
                     "start": round(item.get("start", 0) / 1000.0, 2),
                     "end": round(item.get("end", 0) / 1000.0, 2),
                 })
-            logger.info("[DIAG] Extracted %d segments from sentence_info", len(segments))
             return segments
 
-        # Format 2: direct text field (non-timestamp or simple models)
+        # Format B: text + timestamp (FunASR 1.3.x Paraformer)
         text = first.get("text", "").strip()
-        if text:
-            # Check for timestamp list
-            timestamps = first.get("timestamp", [])
-            if timestamps and isinstance(timestamps, list):
-                # Split text by timestamps
-                words = text.split()
-                for i, ts_pair in enumerate(timestamps):
-                    if i < len(words):
-                        start_ms = ts_pair[0] if isinstance(ts_pair, (list, tuple)) else 0
-                        end_ms = ts_pair[1] if isinstance(ts_pair, (list, tuple)) and len(ts_pair) > 1 else 0
-                        segments.append({
-                            "text": words[i],
-                            "start": round(start_ms / 1000.0, 2),
-                            "end": round(end_ms / 1000.0, 2),
-                        })
-            else:
-                # No timestamps — return as single segment
-                segments.append({
-                    "text": text,
-                    "start": 0.0,
-                    "end": 0.0,
-                })
-            logger.info("[DIAG] Extracted %d segments from text field", len(segments))
-            return segments
+        timestamps = first.get("timestamp", [])
 
-        # Format 3: unknown — log full structure for debugging
-        logger.warning(
-            "[DIAG] FunASR result[0] has no sentence_info or text. "
-            "Full keys+types: %s",
-            {k: type(v).__name__ for k, v in first.items()},
+        if not text:
+            logger.warning("FunASR result has no text content")
+            return []
+
+        if not timestamps:
+            # No timestamps — return as single segment
+            return [{"text": text, "start": 0.0, "end": 0.0}]
+
+        # Split text into words and merge into sentence-level segments.
+        # Words are space-separated (Chinese char groups from Paraformer).
+        # We merge consecutive words with gaps < SENTENCE_GAP_MS into
+        # sentence-level segments for better readability.
+        words = text.split()
+        SENTENCE_GAP_MS = 800  # gap threshold to split sentences
+        MIN_SEGMENT_DURATION_MS = 500
+
+        # Build raw word-level entries
+        word_entries: List[Dict[str, float]] = []
+        for i, word in enumerate(words):
+            if i < len(timestamps):
+                start_ms = timestamps[i][0]
+                end_ms = timestamps[i][1]
+            else:
+                # More words than timestamps — skip extras
+                break
+            word_entries.append({"text": word, "start": start_ms, "end": end_ms})
+
+        if not word_entries:
+            return []
+
+        # Merge words into sentence-level segments based on gaps
+        current_text = word_entries[0]["text"]
+        seg_start = word_entries[0]["start"]
+        seg_end = word_entries[0]["end"]
+
+        for j in range(1, len(word_entries)):
+            gap = word_entries[j]["start"] - seg_end
+            if gap > SENTENCE_GAP_MS:
+                # End current segment, start new one
+                segments.append({
+                    "text": current_text,
+                    "start": round(seg_start / 1000.0, 2),
+                    "end": round(seg_end / 1000.0, 2),
+                })
+                current_text = word_entries[j]["text"]
+                seg_start = word_entries[j]["start"]
+                seg_end = word_entries[j]["end"]
+            else:
+                # Continue current segment
+                current_text += word_entries[j]["text"]
+                seg_end = word_entries[j]["end"]
+
+        # Don't forget the last segment
+        segments.append({
+            "text": current_text,
+            "start": round(seg_start / 1000.0, 2),
+            "end": round(seg_end / 1000.0, 2),
+        })
+
+        # Post-process: merge very short segments (< MIN_SEGMENT_DURATION_MS)
+        # with the next segment to avoid tiny fragments
+        merged: List[Dict[str, float]] = []
+        for seg in segments:
+            dur_ms = (seg["end"] - seg["start"]) * 1000
+            if merged and dur_ms < MIN_SEGMENT_DURATION_MS:
+                # Merge with previous segment
+                merged[-1]["text"] += seg["text"]
+                merged[-1]["end"] = seg["end"]
+            else:
+                merged.append(seg)
+
+        logger.info(
+            "Extracted %d segments from text+timestamp (%d words, %d timestamps)",
+            len(merged), len(words), len(timestamps),
         )
-        return segments
+        return merged
 
     def _transcribe_single(
         self,
@@ -351,7 +394,9 @@ class FunASREngine(TranscriptionEngine):
             progress_callback(0.8, "Processing results...")
 
         segments = self._extract_segments(result)
-        duration = segments[-1]["end"] if segments else total_duration
+        # Use last segment's end time if available, otherwise use total_duration
+        last_end = segments[-1]["end"] if segments else 0.0
+        duration = last_end if last_end > 0 else total_duration
 
         if progress_callback:
             progress_callback(1.0, "Done")
@@ -388,14 +433,6 @@ class FunASREngine(TranscriptionEngine):
                     )
 
                 result = model.generate(input=chunk_path)
-                if i == 0:
-                    # Log first chunk result structure for debugging
-                    logger.info(
-                        "[DIAG] First chunk result: type=%s, len=%s, keys=%s",
-                        type(result).__name__,
-                        len(result) if isinstance(result, list) else "N/A",
-                        list(result[0].keys()) if isinstance(result, list) and result and isinstance(result[0], dict) else "N/A",
-                    )
                 segs = self._extract_segments(result)
 
                 # Shift timestamps by chunk offset and deduplicate

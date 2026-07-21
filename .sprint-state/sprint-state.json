@@ -1,9 +1,10 @@
 {
   "id": "sprint-2026-07-15-01",
   "task_description": "GUI 主题拆分 Phase B — 一键 LLM 章节检测、可编辑章节列表、可视化时间轴、后台视频切割",
-  "phase": 1,
-  "status": "in_progress",
+  "phase": 6,
+  "status": "completed",
   "started_at": "2026-07-15T00:00:00Z",
+  "completed_at": "2026-07-15T18:00:00Z",
   "isolation": {
     "worktree_path": ".worktrees/sprint/sprint-2026-07-15-01",
     "branch": "sprint/2026-07-15-01",
@@ -34,17 +35,23 @@
     }
   ],
   "phase_history": [
-    {
-      "phase": 1,
-      "phase_name": "PREP",
-      "status": "completed",
-      "started_at": "2026-07-15T00:00:00Z",
-      "completed_at": "2026-07-15T00:05:00Z",
-      "duration_seconds": 300
-    }
+    {"phase": 1, "phase_name": "PREP", "status": "completed", "started_at": "2026-07-15T00:00:00Z", "completed_at": "2026-07-15T00:05:00Z"},
+    {"phase": 2, "phase_name": "DESIGN", "status": "completed", "started_at": "2026-07-15T00:05:00Z", "completed_at": "2026-07-15T01:00:00Z"},
+    {"phase": 3, "phase_name": "BUILD", "status": "completed", "started_at": "2026-07-15T01:00:00Z", "completed_at": "2026-07-15T12:00:00Z"},
+    {"phase": 4, "phase_name": "VERIFY", "status": "completed", "started_at": "2026-07-15T12:00:00Z", "completed_at": "2026-07-15T13:00:00Z"},
+    {"phase": 5, "phase_name": "SHIP", "status": "completed", "started_at": "2026-07-15T13:00:00Z", "completed_at": "2026-07-15T15:56:00Z"},
+    {"phase": 6, "phase_name": "CLOSE", "status": "completed", "started_at": "2026-07-15T15:56:00Z", "completed_at": "2026-07-15T18:00:00Z"}
   ],
-  "outputs": {},
-  "metrics": {}
+  "outputs": {
+    "pr": "https://github.com/boyingliu01/VideoSplitter/pull/6",
+    "branch": "sprint/2026-07-15-01"
+  },
+  "metrics": {
+    "tests_passed": 297,
+    "tests_failed": 0,
+    "new_files": 7,
+    "modified_files": 5
+  }
 }
 {
   "id": "sprint-2026-07-13-04",

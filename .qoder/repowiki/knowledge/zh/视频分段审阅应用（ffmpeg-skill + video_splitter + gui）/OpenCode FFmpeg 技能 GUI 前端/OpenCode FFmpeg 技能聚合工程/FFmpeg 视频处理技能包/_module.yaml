@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: 706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/b93b96e8-b7bd-4dca-b5bf-352a1be518db
+title: FFmpeg 视频处理技能包
+scope:
+    - ffmpeg-skill/
+source_files: []
+depends_on: []
+related_to: []

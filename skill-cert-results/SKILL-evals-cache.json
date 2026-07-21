@@ -1,0 +1,199 @@
+{
+  "eval_cases": [
+    {
+      "id": 1,
+      "name": "Normal: Convert MP4 to WebM with VP9/Opus",
+      "category": "normal",
+      "input": "Convert the video 'input.mp4' to WebM format using VP9 video codec and Opus audio codec for web streaming.",
+      "expected_triggers": true,
+      "assertions": [
+        {
+          "type": "regex",
+          "value": "(Construct FFmpeg command|Generated command)",
+          "weight": 3
+        },
+        {
+          "type": "regex",
+          "value": "(-c:v libvpx-vp9|-c:a libopus)",
+          "weight": 3
+        },
+        {
+          "type": "contains",
+          "value": "webm",
+          "weight": 2
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Normal: Resize video maintaining aspect ratio",
+      "category": "normal",
+      "input": "Resize 'clip.mov' to 720p height while ensuring the aspect ratio is preserved.",
+      "expected_triggers": true,
+      "assertions": [
+        {
+          "type": "regex",
+          "value": "(scale=.*:-1|aspect_ratio|maintain.*ratio)",
+          "weight": 3
+        },
+        {
+          "type": "regex",
+          "value": "(Validate parameters|Parse.*resolution)",
+          "weight": 2
+        },
+        {
+          "type": "not_contains",
+          "value": "stretch",
+          "weight": 2
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Failure: Input file not found",
+      "category": "failure",
+      "input": "Extract audio from 'non_existent_file.avi' to MP3.",
+      "expected_triggers": true,
+      "assertions": [
+        {
+          "type": "regex",
+          "value": "(Input files not found|File does not exist|No such file)",
+          "weight": 3
+        },
+        {
+          "type": "regex",
+          "value": "(Error handling|Return structured results|error message)",
+          "weight": 2
+        },
+        {
+          "type": "not_contains",
+          "value": "Execute FFmpeg process",
+          "weight": 2
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Failure: Invalid time format parameter",
+      "category": "failure",
+      "input": "Cut a segment from 00:99:99 to 00:99:99 in 'video.mp4'.",
+      "expected_triggers": true,
+      "assertions": [
+        {
+          "type": "regex",
+          "value": "(Invalid parameters|time format|validation failed)",
+          "weight": 3
+        },
+        {
+          "type": "regex",
+          "value": "(Parse and validate parameters|structured error)",
+          "weight": 2
+        },
+        {
+          "type": "not_contains",
+          "value": "ffmpeg -ss 00:99:99",
+          "weight": 2
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Trigger: Batch processing request",
+      "category": "trigger",
+      "input": "I need to batch resize all videos in the /home/user/videos folder to 480p.",
+      "expected_triggers": true,
+      "assertions": [
+        {
+          "type": "regex",
+          "value": "(batch process|directory|loop|iterate)",
+          "weight": 3
+        },
+        {
+          "type": "regex",
+          "value": "(Scale|resize|480p)",
+          "weight": 2
+        },
+        {
+          "type": "contains",
+          "value": "FFmpeg",
+          "weight": 2
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Trigger: Audio extraction request",
+      "category": "trigger",
+      "input": "Please extract the audio track from my movie file into a high-quality MP3.",
+      "expected_triggers": true,
+      "assertions": [
+        {
+          "type": "regex",
+          "value": "(extract.*audio|audio.*track|MP3)",
+          "weight": 3
+        },
+        {
+          "type": "regex",
+          "value": "(codec|bitrate|320k)",
+          "weight": 2
+        },
+        {
+          "type": "contains",
+          "value": "ffmpeg",
+          "weight": 2
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Trigger: Metadata retrieval request",
+      "category": "trigger",
+      "input": "Can you tell me the duration, resolution, and FPS of this video file?",
+      "expected_triggers": true,
+      "assertions": [
+        {
+          "type": "regex",
+          "value": "(metadata|duration|resolution|FPS|codec)",
+          "weight": 3
+        },
+        {
+          "type": "regex",
+          "value": "(ffprobe|inspect|analyze)",
+          "weight": 2
+        },
+        {
+          "type": "contains",
+          "value": "video",
+          "weight": 2
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Non-Trigger: Text summarization request",
+      "category": "trigger",
+      "input": "Summarize the plot of the movie 'Inception' in three sentences.",
+      "expected_triggers": false,
+      "assertions": [
+        {
+          "type": "regex",
+          "value": "(summarize|plot|story|sentences)",
+          "weight": 3
+        },
+        {
+          "type": "not_contains",
+          "value": "ffmpeg",
+          "weight": 3
+        },
+        {
+          "type": "not_contains",
+          "value": "video processing",
+          "weight": 2
+        }
+      ]
+    }
+  ],
+  "degraded": true,
+  "failed": false,
+  "_coverage": 0.6098214285714285
+}
