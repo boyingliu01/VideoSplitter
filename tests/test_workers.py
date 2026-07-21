@@ -27,17 +27,27 @@ def mock_engine():
     return engine
 
 
+@pytest.fixture
+def mock_extractor():
+    """Patch AudioExtractor.extract to return the input path unchanged."""
+    with patch("gui.workers.transcribe_worker.AudioExtractor") as mock_cls:
+        instance = MagicMock()
+        instance.extract.side_effect = lambda path: path
+        mock_cls.return_value = instance
+        yield instance
+
+
 class TestTranscribeWorker:
     """Tests for TranscribeWorker signal emissions and error handling."""
 
-    def test_run_emits_finished_with_valid_transcript(self, mock_engine):
+    def test_run_emits_finished_with_valid_transcript(self, mock_engine, mock_extractor):
         worker = TranscribeWorker(engine_name="funasr")
         worker.finished = MagicMock()
         worker.progress = MagicMock()
         worker.error = MagicMock()
 
         with patch("gui.workers.transcribe_worker.create_engine", return_value=mock_engine):
-            worker.run("test_audio.wav")
+            worker.run("test_video.mp4")
 
         worker.finished.emit.assert_called_once()
         worker.error.emit.assert_not_called()
@@ -46,7 +56,7 @@ class TestTranscribeWorker:
         assert call_arg["duration"] == 10.0
         assert len(call_arg["segments"]) == 1
 
-    def test_run_emits_progress_during_transcription(self, mock_engine):
+    def test_run_emits_progress_during_transcription(self, mock_engine, mock_extractor):
         worker = TranscribeWorker(engine_name="funasr")
         worker.finished = MagicMock()
         worker.progress = MagicMock()
@@ -62,13 +72,13 @@ class TestTranscribeWorker:
         mock_engine.transcribe.side_effect = _fake_transcribe
 
         with patch("gui.workers.transcribe_worker.create_engine", return_value=mock_engine):
-            worker.run("test_audio.wav")
+            worker.run("test_video.mp4")
 
         assert worker.progress.emit.call_count == 3
         worker.finished.emit.assert_called_once()
         worker.error.emit.assert_not_called()
 
-    def test_run_emits_error_on_exception(self):
+    def test_run_emits_error_on_exception(self, mock_extractor):
         worker = TranscribeWorker(engine_name="funasr")
         worker.finished = MagicMock()
         worker.progress = MagicMock()
@@ -78,11 +88,39 @@ class TestTranscribeWorker:
         engine.transcribe.side_effect = RuntimeError("Model load failed")
 
         with patch("gui.workers.transcribe_worker.create_engine", return_value=engine):
-            worker.run("test_audio.wav")
+            worker.run("test_video.mp4")
 
         worker.error.emit.assert_called_once()
         worker.finished.emit.assert_not_called()
         assert "Model load failed" in worker.error.emit.call_args[0][0]
+
+    def test_run_extracts_audio_before_transcribe(self, mock_engine, mock_extractor):
+        """Worker must call AudioExtractor.extract() with the video path."""
+        worker = TranscribeWorker(engine_name="funasr")
+        worker.finished = MagicMock()
+        worker.progress = MagicMock()
+        worker.error = MagicMock()
+
+        with patch("gui.workers.transcribe_worker.create_engine", return_value=mock_engine):
+            worker.run("my_video.mp4")
+
+        mock_extractor.extract.assert_called_once_with("my_video.mp4")
+
+    def test_run_cleans_up_extracted_wav(self, mock_engine, mock_extractor):
+        """Worker should delete the temporary WAV after transcription."""
+        worker = TranscribeWorker(engine_name="funasr")
+        worker.finished = MagicMock()
+        worker.progress = MagicMock()
+        worker.error = MagicMock()
+
+        # Override side_effect so extract() returns a distinct path
+        mock_extractor.extract.side_effect = None
+        mock_extractor.extract.return_value = "/tmp/extracted_audio.wav"
+
+        with patch("gui.workers.transcribe_worker.create_engine", return_value=mock_engine):
+            with patch("gui.workers.transcribe_worker.os.unlink") as mock_unlink:
+                worker.run("test_video.mp4")
+                mock_unlink.assert_called_once_with("/tmp/extracted_audio.wav")
 
     def test_default_engine_is_funasr(self):
         worker = TranscribeWorker()
@@ -105,7 +143,7 @@ class TestTranscribeWorker:
         from video_splitter.config import SplitConfig
         assert isinstance(worker._config, SplitConfig)
 
-    def test_worker_custom_engine(self):
+    def test_worker_custom_engine(self, mock_extractor):
         engine = MagicMock()
         worker = TranscribeWorker(engine_name="whisper")
         worker.finished = MagicMock()
@@ -114,14 +152,14 @@ class TestTranscribeWorker:
 
         with patch("gui.workers.transcribe_worker.create_engine") as mock_create:
             mock_create.return_value = engine
-            worker.run("test_audio.wav")
+            worker.run("test_video.mp4")
             mock_create.assert_called_once_with("whisper", worker._config)
 
 
 class TestTranscribeWorkerWithQThread:
     """Integration tests: TranscribeWorker running in an actual QThread."""
 
-    def test_worker_in_qthread_emits_finished(self, mock_engine):
+    def test_worker_in_qthread_emits_finished(self, mock_engine, mock_extractor):
         """Worker moved to QThread emits finished signal correctly."""
         from PySide6.QtCore import QThread, QCoreApplication
 
@@ -147,7 +185,7 @@ class TestTranscribeWorkerWithQThread:
         tw.create_engine = lambda *a, **kw: mock_engine
 
         try:
-            thread.started.connect(lambda: worker.run("test_audio.wav"))
+            thread.started.connect(lambda: worker.run("test_video.mp4"))
             thread.start()
             # Process events until the worker thread finishes
             import time
