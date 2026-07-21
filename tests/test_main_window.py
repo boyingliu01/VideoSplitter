@@ -195,17 +195,33 @@ class TestTranscribeWorkflow:
         assert "50%" in win._status_bar_widget._label.text()
 
     @patch("gui.app.FunASREngine")
-    def test_on_transcribe_finished(self, MockEngine, qapp):
+    def test_on_transcribe_finished(self, MockEngine, qapp, tmp_path):
+        """Transcription result must be visible in subtitle panel, not just split controller."""
         MockEngine.return_value.health_check.return_value = (True, "OK")
         from gui.app import MainWindow
         win = MainWindow()
         win._cleanup_thread = MagicMock()
-        win._split_controller.set_transcript = MagicMock()
-        win._split_panel.set_duration = MagicMock()
+        # Set a video path so transcript can be saved next to it
+        fake_video = str(tmp_path / "test_video.mp4")
+        # Create a dummy file so Path operations work
+        with open(fake_video, "wb") as f:
+            f.write(b"\x00")
+        win._current_video_path = fake_video
+
         transcript = _make_transcript()
         win._on_transcribe_finished(transcript)
-        win._split_controller.set_transcript.assert_called_once_with(transcript)
-        win._split_panel.set_duration.assert_called_once_with(30.0)
+
+        # KEY ASSERTION: ReviewController must have the segments loaded
+        segments = win._controller._segments
+        assert len(segments) == 3, "Subtitle panel should have segments after transcription"
+        assert segments[0]["text"] == "seg0"
+
+        # KEY ASSERTION: Subtitle panel must display the first segment
+        assert "Segment 1/3" in win._subtitle_panel._segment_label.text()
+        assert win._subtitle_panel._original_label.text() == "seg0"
+
+        # Split controller should also receive the transcript
+        assert win._split_controller._transcript == transcript
         win._cleanup_thread.assert_called_once()
 
     @patch("gui.app.FunASREngine")

@@ -27,6 +27,7 @@ from gui.workers.detect_worker import DetectChaptersWorker
 from gui.workers.split_worker import SplitWorker
 from gui.workers.transcribe_worker import TranscribeWorker
 from video_splitter.extractor.engines import FunASREngine
+from video_splitter.review import save_transcript_atomic
 
 
 class MainWindow(QMainWindow):
@@ -254,6 +255,23 @@ class MainWindow(QMainWindow):
             self._controller.load_transcript(path)
         except Exception as exc:
             QMessageBox.warning(self, "Error", f"Failed to load transcript:\n{exc}")
+            return
+
+        # Show the first segment in the subtitle panel
+        seg = self._controller.current_segment()
+        if seg:
+            self._on_segment_changed({
+                "index": seg["index"],
+                "total": len(self._controller._segments),
+                "text": seg["text"],
+                "start": seg["start"],
+                "end": seg["end"],
+                "modified": False,
+            })
+
+        # Pass transcript to split controller for chapter detection
+        self._split_controller.set_transcript(self._controller.get_transcript())
+        self._status_bar_widget.set_status(f"Loaded transcript: {path}")
 
     def _on_save_next(self) -> None:
         seg = self._controller.current_segment()
@@ -304,6 +322,40 @@ class MainWindow(QMainWindow):
     def _on_transcribe_finished(self, transcript: dict) -> None:
         self._status_bar_widget.set_status("Transcription complete")
         self._cleanup_thread()
+
+        # Save transcript to disk next to the video file
+        transcript_path = str(
+            Path(self._current_video_path).with_suffix(".transcript.json")
+        )
+        try:
+            save_transcript_atomic(transcript_path, transcript)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Error", f"Failed to save transcript:\n{exc}"
+            )
+            return
+
+        # Load transcript into ReviewController so subtitle panel is populated
+        try:
+            self._controller.load_transcript(transcript_path)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Error", f"Failed to load transcript for review:\n{exc}"
+            )
+            return
+
+        # Show the first segment in the subtitle panel
+        seg = self._controller.current_segment()
+        if seg:
+            self._on_segment_changed({
+                "index": seg["index"],
+                "total": len(self._controller._segments),
+                "text": seg["text"],
+                "start": seg["start"],
+                "end": seg["end"],
+                "modified": False,
+            })
+
         # Pass transcript to split controller for chapter detection
         self._split_controller.set_transcript(transcript)
         self._split_panel.set_duration(transcript.get("duration", 0.0))

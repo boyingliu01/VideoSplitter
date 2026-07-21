@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 (2026-07-20)
+
+- Fix critical GUI wiring bugs: transcription result now correctly populates subtitle panel
+- Fix `_on_transcribe_finished`: save transcript to disk, load into ReviewController, display first segment
+- Fix `_on_open_transcript`: display first segment and pass transcript to SplitController
+- Fix FunASR 1.3.14 model loading: use registered class name "Paraformer" with fallback chain
+- Add GUI signal wiring integration tests (5 tests verifying end-to-end data flow)
+- Add E2E test suite: CLI commands, review/export, edge cases, pipeline integration
+- Add TranscribeWorker audio extraction step (was missing, causing RIFF header errors)
+- Test count: 449+ tests, all passing
+
 ## 0.4.0 (2026-07-15)
 
 - Test coverage raised from 71% to 88.91% (424 tests, all passing)
