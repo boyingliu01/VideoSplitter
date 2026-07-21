@@ -1,0 +1,135 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: master
+nodes_managed: true
+exported_at: "2026-07-21T13:50:43Z"
+modules:
+    "":
+        dir_name: 视频分段审阅应用（ffmpeg-skill + video_splitter + gui）
+        title: 视频分段审阅应用（ffmpeg-skill + video_splitter + gui）
+        scope: []
+        source_files: []
+        children:
+            - 26091068-ff2d-4569-805c-3bf54ec0c621
+            - 706fadf6-000d-4e58-a2f9-66cd8e8f02f1
+        depends_on: []
+        related_to: []
+    706fadf6-000d-4e58-a2f9-66cd8e8f02f1:
+        dir_name: OpenCode FFmpeg 技能 GUI 前端
+        title: OpenCode FFmpeg 技能 GUI 前端
+        scope:
+            - gui/
+        source_files: []
+        children:
+            - 706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52
+        depends_on: []
+        related_to: []
+    706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52:
+        dir_name: OpenCode FFmpeg 技能聚合工程
+        title: OpenCode FFmpeg 技能聚合工程
+        scope:
+            - README.md
+            - PROJECT_SUMMARY.md
+            - COMPLETION_REPORT.md
+            - OPENCODE_SETUP.md
+            - architecture.yaml
+            - pyproject.toml
+            - requirements.txt
+            - package.json
+            - install.sh
+            - install.bat
+            - skill.md
+            - .code-walkthrough-result.json
+            - .coverage
+            - .gitignore
+            - AGENTS.md
+            - CHANGELOG.md
+            - VERSION
+            - _bg_error.txt
+            - _bg_error2.txt
+            - _bg_output.txt
+            - _bg_output2.txt
+            - _run_cert.py
+            - _run_cert2.py
+            - _run_cert3.py
+            - _run_cert4.py
+            - _run_cert5.py
+            - _run_cert_bg.py
+            - _run_cert_bg2.py
+            - _run_cert_output.txt
+            - _trace.txt
+            - _trace3.txt
+            - _trace4.txt
+        source_files: []
+        children:
+            - 706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/5c8a1afd-ef76-425b-a951-7c0c62f8dda5
+            - 706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/a688e674-8f52-4145-ab4f-619d6ab8a8ad
+            - 706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/b93b96e8-b7bd-4dca-b5bf-352a1be518db
+        depends_on: []
+        related_to: []
+    706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/5c8a1afd-ef76-425b-a951-7c0c62f8dda5:
+        dir_name: PySide6 GUI 单测与 FFmpeg Skill 离线评测集
+        title: PySide6 GUI 单测与 FFmpeg Skill 离线评测集
+        scope:
+            - tests/
+            - ffmpeg-video-workspace/
+            - skill-cert-results/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/a688e674-8f52-4145-ab4f-619d6ab8a8ad:
+        dir_name: 技能认证脚本与迁移设计文档
+        title: 技能认证脚本与迁移设计文档
+        scope:
+            - docs/
+            - .opencode/
+            - _run_cert*.py
+            - _bg_output*.txt
+            - _trace*.txt
+            - _pr_body.txt
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/b93b96e8-b7bd-4dca-b5bf-352a1be518db:
+        dir_name: FFmpeg 视频处理技能包
+        title: FFmpeg 视频处理技能包
+        scope:
+            - ffmpeg-skill/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    26091068-ff2d-4569-805c-3bf54ec0c621:
+        dir_name: 视频分割流水线（音频提取-ASR-章节检测-硬烧切割）
+        title: 视频分割流水线（音频提取-ASR-章节检测-硬烧切割）
+        scope:
+            - video_splitter/
+        source_files: []
+        children:
+            - 26091068-ff2d-4569-805c-3bf54ec0c621/3e4062a4-bf3a-4f9a-baee-feaf3f2bec10
+            - 26091068-ff2d-4569-805c-3bf54ec0c621/subtitle_burner
+        depends_on: []
+        related_to: []
+    26091068-ff2d-4569-805c-3bf54ec0c621/3e4062a4-bf3a-4f9a-baee-feaf3f2bec10:
+        dir_name: 视频分割核心运行时（CLI_流水线_交互式校对）
+        title: 视频分割核心运行时（CLI/流水线/交互式校对）
+        scope:
+            - video_splitter/pipeline.py
+            - video_splitter/review.py
+            - video_splitter/cli.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    26091068-ff2d-4569-805c-3bf54ec0c621/subtitle_burner:
+        dir_name: 字幕硬烧入视频分段
+        title: 字幕硬烧入视频分段
+        scope:
+            - video_splitter/splitter/subtitle_burner.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []

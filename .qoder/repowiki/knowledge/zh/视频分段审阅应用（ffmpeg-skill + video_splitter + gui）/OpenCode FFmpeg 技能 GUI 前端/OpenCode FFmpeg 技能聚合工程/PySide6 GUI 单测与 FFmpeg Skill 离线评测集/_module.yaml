@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: 706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/5c8a1afd-ef76-425b-a951-7c0c62f8dda5
+title: PySide6 GUI 单测与 FFmpeg Skill 离线评测集
+scope:
+    - tests/
+    - ffmpeg-video-workspace/
+    - skill-cert-results/
+source_files: []
+depends_on: []
+related_to: []

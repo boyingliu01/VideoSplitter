@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: 706fadf6-000d-4e58-a2f9-66cd8e8f02f1
+title: OpenCode FFmpeg 技能 GUI 前端
+scope:
+    - gui/
+source_files: []
+depends_on: []
+related_to: []

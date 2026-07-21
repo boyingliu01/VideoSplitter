@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: 26091068-ff2d-4569-805c-3bf54ec0c621/3e4062a4-bf3a-4f9a-baee-feaf3f2bec10
+title: 视频分割核心运行时（CLI/流水线/交互式校对）
+scope:
+    - video_splitter/pipeline.py
+    - video_splitter/review.py
+    - video_splitter/cli.py
+source_files: []
+depends_on: []
+related_to: []

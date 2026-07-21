@@ -1,0 +1,17 @@
+[
+  {
+    "title": "Part1_Intro",
+    "start_seconds": 0.0,
+    "end_seconds": 20.0
+  },
+  {
+    "title": "Part2_Core",
+    "start_seconds": 20.0,
+    "end_seconds": 40.0
+  },
+  {
+    "title": "Part3_Test",
+    "start_seconds": 40.0,
+    "end_seconds": 60.0
+  }
+]

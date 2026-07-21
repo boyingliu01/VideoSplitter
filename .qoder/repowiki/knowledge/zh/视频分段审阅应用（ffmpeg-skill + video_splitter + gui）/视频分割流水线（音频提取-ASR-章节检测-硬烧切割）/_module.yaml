@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: 26091068-ff2d-4569-805c-3bf54ec0c621
+title: 视频分割流水线（音频提取-ASR-章节检测-硬烧切割）
+scope:
+    - video_splitter/
+source_files: []
+depends_on: []
+related_to: []

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2 (2026-07-21)
+
+- Fix FunASR segment extraction: support text+timestamp format (FunASR 1.3.x Paraformer)
+- Previous code only looked for `sentence_info` key which doesn't exist in current FunASR version
+- New logic merges word-level timestamps into sentence-level segments for better readability
+- Clean up diagnostic logging, keep only essential info/error messages
+- Tests: 449 passed, all clean
+
 ## 0.5.1 (2026-07-20)
 
 - Improve GUI startup responsiveness: move FunASR health check to background thread

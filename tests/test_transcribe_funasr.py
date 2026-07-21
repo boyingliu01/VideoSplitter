@@ -71,8 +71,8 @@ class TestFunASROutputMapping:
         assert transcript["language"] == "zh"
         assert transcript["duration"] == 4.5
 
-    def test_sentence_info_none_falls_back_to_ffprobe(self):
-        """sentence_info=None → ffprobe for duration, empty segments."""
+    def test_sentence_info_none_falls_back_to_text_format(self):
+        """sentence_info=None → falls through to text+timestamp format."""
         engine = FunASREngine()
         fake_result = [{"text": "完整文本", "sentence_info": None}]
         mock_model = MagicMock()
@@ -86,11 +86,13 @@ class TestFunASROutputMapping:
                 transcript = engine.transcribe("dummy.wav", SplitConfig())
 
         assert transcript["duration"] == 10.5
-        assert transcript["segments"] == []
+        # New behavior: text without timestamps returns as single segment
+        assert len(transcript["segments"]) == 1
+        assert transcript["segments"][0]["text"] == "完整文本"
         mock_dur.assert_called_once_with("dummy.wav")
 
-    def test_sentence_info_empty_list_falls_back_to_ffprobe(self):
-        """sentence_info=[] → ffprobe fallback."""
+    def test_sentence_info_empty_list_falls_back_to_text_format(self):
+        """sentence_info=[] → falls through to text+timestamp format."""
         engine = FunASREngine()
         fake_result = [{"text": "文本", "sentence_info": []}]
         mock_model = MagicMock()
@@ -104,7 +106,9 @@ class TestFunASROutputMapping:
                 transcript = engine.transcribe("dummy.wav", SplitConfig())
 
         assert transcript["duration"] == 8.0
-        assert transcript["segments"] == []
+        # New behavior: text without timestamps returns as single segment
+        assert len(transcript["segments"]) == 1
+        assert transcript["segments"][0]["text"] == "文本"
 
     def test_segments_with_empty_text_are_skipped(self):
         """Segments with empty text are filtered out of result."""

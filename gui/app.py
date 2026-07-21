@@ -363,11 +363,7 @@ class MainWindow(QMainWindow):
 
     def _on_transcribe_finished(self, transcript: dict) -> None:
         n_segs = len(transcript.get("segments", []))
-        logger.info(
-            "[DIAG] _on_transcribe_finished CALLED: %d segments, duration=%s",
-            n_segs,
-            transcript.get("duration", "?"),
-        )
+        logger.info("Transcription complete: %d segments", n_segs)
         self._status_bar_widget.set_status(f"Transcription complete ({n_segs} segments)")
         self._cleanup_thread()
 
@@ -375,23 +371,20 @@ class MainWindow(QMainWindow):
         transcript_path = str(
             Path(self._current_video_path).with_suffix(".transcript.json")
         )
-        logger.info("[DIAG] Saving transcript to: %s", transcript_path)
         try:
             save_transcript_atomic(transcript_path, transcript)
         except Exception as exc:
-            logger.error("[DIAG] Save transcript FAILED: %s", exc)
+            logger.error("Failed to save transcript: %s", exc)
             QMessageBox.warning(
                 self, "Error", f"Failed to save transcript:\n{exc}"
             )
             return
 
         # Load transcript into ReviewController so subtitle panel is populated
-        logger.info("[DIAG] Loading transcript into ReviewController...")
         try:
-            segments = self._controller.load_transcript(transcript_path)
-            logger.info("[DIAG] ReviewController loaded %d segments", len(segments))
+            self._controller.load_transcript(transcript_path)
         except Exception as exc:
-            logger.error("[DIAG] Load transcript FAILED: %s", exc)
+            logger.error("Failed to load transcript for review: %s", exc)
             QMessageBox.warning(
                 self, "Error", f"Failed to load transcript for review:\n{exc}"
             )
@@ -399,9 +392,7 @@ class MainWindow(QMainWindow):
 
         # Show the first segment in the subtitle panel
         seg = self._controller.current_segment()
-        logger.info("[DIAG] current_segment() = %s", seg)
         if seg:
-            logger.info("[DIAG] Calling _on_segment_changed for segment %d", seg["index"])
             self._on_segment_changed({
                 "index": seg["index"],
                 "total": len(self._controller._segments),
@@ -411,14 +402,14 @@ class MainWindow(QMainWindow):
                 "modified": False,
             })
         else:
-            logger.warning("[DIAG] current_segment() returned None! No segments to display.")
+            logger.warning("No segments to display after transcription")
 
         # Pass transcript to split controller for chapter detection
         self._split_controller.set_transcript(transcript)
         self._split_panel.set_duration(transcript.get("duration", 0.0))
 
     def _on_transcribe_error(self, msg: str) -> None:
-        logger.error("[DIAG] Transcription error: %s", msg)
+        logger.error("Transcription error: %s", msg)
         QMessageBox.warning(self, "Transcription Error", msg)
         self._status_bar_widget.set_status("Transcription failed")
         self._cleanup_thread()
