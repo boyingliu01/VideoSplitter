@@ -53,10 +53,9 @@ class TestTranscriptionToSubtitleFlow:
     the user must see the transcribed text in the subtitle panel.
     """
 
-    @patch("gui.app.FunASREngine")
-    def test_transcription_populates_subtitle_panel(self, MockEngine, qapp, tmp_path):
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_transcription_populates_subtitle_panel(self, mock_hc, qapp, tmp_path):
         """After transcription, subtitle panel must show the first segment."""
-        MockEngine.return_value.health_check.return_value = (True, "OK")
         from gui.app import MainWindow
 
         win = MainWindow()
@@ -91,10 +90,9 @@ class TestTranscriptionToSubtitleFlow:
         timestamp = win._subtitle_panel._timestamp_label.text()
         assert "00:00" in timestamp or "00:10" in timestamp
 
-    @patch("gui.app.FunASREngine")
-    def test_transcription_enables_navigation(self, MockEngine, qapp, tmp_path):
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_transcription_enables_navigation(self, mock_hc, qapp, tmp_path):
         """After transcription, user must be able to navigate between segments."""
-        MockEngine.return_value.health_check.return_value = (True, "OK")
         from gui.app import MainWindow
 
         win = MainWindow()
@@ -123,10 +121,9 @@ class TestTranscriptionToSubtitleFlow:
         assert result is not None
         assert result["text"] == "这是第3段测试文本"
 
-    @patch("gui.app.FunASREngine")
-    def test_transcription_saves_file_for_review(self, MockEngine, qapp, tmp_path):
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_transcription_saves_file_for_review(self, mock_hc, qapp, tmp_path):
         """Transcript must be saved to disk so review can be resumed later."""
-        MockEngine.return_value.health_check.return_value = (True, "OK")
         from gui.app import MainWindow
 
         win = MainWindow()
@@ -153,10 +150,9 @@ class TestTranscriptionToSubtitleFlow:
         assert len(loaded["segments"]) == 5
         assert loaded["segments"][0]["text"] == "这是第1段测试文本"
 
-    @patch("gui.app.FunASREngine")
-    def test_transcription_also_feeds_split_controller(self, MockEngine, qapp, tmp_path):
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_transcription_also_feeds_split_controller(self, mock_hc, qapp, tmp_path):
         """Split controller must also receive transcript for chapter detection."""
-        MockEngine.return_value.health_check.return_value = (True, "OK")
         from gui.app import MainWindow
 
         win = MainWindow()
@@ -181,10 +177,9 @@ class TestOpenTranscriptFlow:
     Users should be able to resume work on a previously saved transcript.
     """
 
-    @patch("gui.app.FunASREngine")
-    def test_open_transcript_populates_panel(self, MockEngine, qapp, tmp_path):
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_open_transcript_populates_panel(self, mock_hc, qapp, tmp_path):
         """Loading an existing transcript must populate the subtitle panel AND feed split controller."""
-        MockEngine.return_value.health_check.return_value = (True, "OK")
         from gui.app import MainWindow
         import json
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
+from PySide6.QtCore import Qt, QThread, QUrl, QObject, Signal, Slot
+from PySide6.QtGui import QAction, QCursor, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -28,6 +28,20 @@ from gui.workers.split_worker import SplitWorker
 from gui.workers.transcribe_worker import TranscribeWorker
 from video_splitter.extractor.engines import FunASREngine
 from video_splitter.review import save_transcript_atomic
+
+
+class _HealthCheckWorker(QObject):
+    """Run FunASR health check in a background thread."""
+
+    finished = Signal(bool, str)
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            ok, msg = FunASREngine().health_check()
+            self.finished.emit(ok, msg)
+        except Exception as exc:
+            self.finished.emit(False, str(exc))
 
 
 class MainWindow(QMainWindow):
@@ -59,6 +73,10 @@ class MainWindow(QMainWindow):
         self._burn_worker: BurnWorker | None = None
         self._burn_thread: QThread | None = None
 
+        # Health check worker
+        self._hc_worker: _HealthCheckWorker | None = None
+        self._hc_thread: QThread | None = None
+
         # Track split output for subtitle burning
         self._split_output_files: list[str] = []
 
@@ -67,7 +85,7 @@ class MainWindow(QMainWindow):
         self._build_status()
         self._connect_signals()
         self._setup_shortcuts()
-        self._run_health_check()
+        self._start_health_check()
 
     def _build_menu(self) -> None:
         menu_bar = self.menuBar()
@@ -202,19 +220,32 @@ class MainWindow(QMainWindow):
         save_action.triggered.connect(self._on_save_current)
         self.addAction(save_action)
 
-    def _run_health_check(self) -> None:
-        try:
-            ok, msg = FunASREngine().health_check()
-            self._status_bar_widget.set_status(f"Engine: {'OK' if ok else msg}")
-            if not ok:
-                QMessageBox.warning(
-                    self,
-                    "Engine Health Check",
-                    f"Transcription engine not ready:\n{msg}\n\n"
-                    "You can still work with existing transcripts.",
-                )
-        except Exception as exc:
-            self._status_bar_widget.set_status(f"Engine: error - {exc}")
+    def _start_health_check(self) -> None:
+        """Run FunASR health check in background thread (non-blocking)."""
+        self._status_bar_widget.set_status("Checking engine...")
+        self._hc_worker = _HealthCheckWorker()
+        self._hc_thread = QThread(self)
+        self._hc_worker.moveToThread(self._hc_thread)
+        self._hc_worker.finished.connect(self._on_health_check_done)
+        self._hc_thread.started.connect(self._hc_worker.run)
+        self._hc_thread.finished.connect(self._hc_thread.deleteLater)
+        self._hc_thread.start()
+
+    def _on_health_check_done(self, ok: bool, msg: str) -> None:
+        """Handle health check result from background thread."""
+        self._status_bar_widget.set_status(f"Engine: {'OK' if ok else msg}")
+        if not ok:
+            QMessageBox.warning(
+                self,
+                "Engine Health Check",
+                f"Transcription engine not ready:\n{msg}\n\n"
+                "You can still work with existing transcripts.",
+            )
+        # Cleanup worker
+        if self._hc_thread is not None:
+            self._hc_thread.quit()
+            self._hc_thread = None
+            self._hc_worker = None
 
     def _on_open_video(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -226,9 +257,17 @@ class MainWindow(QMainWindow):
         if not path:
             return
         self._current_video_path = path
+
+        # Show wait cursor and immediate feedback
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+        self._status_bar_widget.set_status("Loading video...")
+
         self._video_player.load_video(path)
         self._split_panel.set_video_path(path)
         self._split_controller.set_video_path(path)
+
+        self._status_bar_widget.set_status("Starting transcription...")
+        QApplication.restoreOverrideCursor()
 
         self._worker = TranscribeWorker("funasr", parent=None)
         self._worker_thread = QThread(self)
