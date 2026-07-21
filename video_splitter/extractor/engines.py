@@ -267,13 +267,24 @@ class FunASREngine(TranscriptionEngine):
 
     @staticmethod
     def _extract_segments(result: Any) -> List[Dict[str, Any]]:
-        """Extract segment list from a FunASR generate() result."""
-        if isinstance(result, list) and len(result) > 0:
-            first = result[0] if isinstance(result[0], dict) else {}
-        else:
-            first = {}
+        """Extract segment list from a FunASR generate() result.
+
+        Handles multiple FunASR result formats:
+        - sentence_info list (timestamp-aware models)
+        - direct text field (non-timestamp models)
+        - timestamp list with text
+        """
+        if not isinstance(result, list) or len(result) == 0:
+            logger.warning("[DIAG] FunASR result is not a non-empty list: type=%s, len=%s",
+                          type(result).__name__, len(result) if isinstance(result, list) else "N/A")
+            return []
+
+        first = result[0] if isinstance(result[0], dict) else {}
+        logger.info("[DIAG] FunASR result[0] keys: %s", list(first.keys()))
 
         segments: List[Dict[str, Any]] = []
+
+        # Format 1: sentence_info (timestamp-aware models like Paraformer)
         sentence_info = first.get("sentence_info")
         if sentence_info:
             for item in sentence_info:
@@ -285,6 +296,42 @@ class FunASREngine(TranscriptionEngine):
                     "start": round(item.get("start", 0) / 1000.0, 2),
                     "end": round(item.get("end", 0) / 1000.0, 2),
                 })
+            logger.info("[DIAG] Extracted %d segments from sentence_info", len(segments))
+            return segments
+
+        # Format 2: direct text field (non-timestamp or simple models)
+        text = first.get("text", "").strip()
+        if text:
+            # Check for timestamp list
+            timestamps = first.get("timestamp", [])
+            if timestamps and isinstance(timestamps, list):
+                # Split text by timestamps
+                words = text.split()
+                for i, ts_pair in enumerate(timestamps):
+                    if i < len(words):
+                        start_ms = ts_pair[0] if isinstance(ts_pair, (list, tuple)) else 0
+                        end_ms = ts_pair[1] if isinstance(ts_pair, (list, tuple)) and len(ts_pair) > 1 else 0
+                        segments.append({
+                            "text": words[i],
+                            "start": round(start_ms / 1000.0, 2),
+                            "end": round(end_ms / 1000.0, 2),
+                        })
+            else:
+                # No timestamps — return as single segment
+                segments.append({
+                    "text": text,
+                    "start": 0.0,
+                    "end": 0.0,
+                })
+            logger.info("[DIAG] Extracted %d segments from text field", len(segments))
+            return segments
+
+        # Format 3: unknown — log full structure for debugging
+        logger.warning(
+            "[DIAG] FunASR result[0] has no sentence_info or text. "
+            "Full keys+types: %s",
+            {k: type(v).__name__ for k, v in first.items()},
+        )
         return segments
 
     def _transcribe_single(
@@ -341,6 +388,14 @@ class FunASREngine(TranscriptionEngine):
                     )
 
                 result = model.generate(input=chunk_path)
+                if i == 0:
+                    # Log first chunk result structure for debugging
+                    logger.info(
+                        "[DIAG] First chunk result: type=%s, len=%s, keys=%s",
+                        type(result).__name__,
+                        len(result) if isinstance(result, list) else "N/A",
+                        list(result[0].keys()) if isinstance(result, list) and result and isinstance(result[0], dict) else "N/A",
+                    )
                 segs = self._extract_segments(result)
 
                 # Shift timestamps by chunk offset and deduplicate
