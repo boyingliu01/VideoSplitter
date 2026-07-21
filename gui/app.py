@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from gui.workers.split_worker import SplitWorker
 from gui.workers.transcribe_worker import TranscribeWorker
 from video_splitter.extractor.engines import FunASREngine
 from video_splitter.review import save_transcript_atomic
+
+logger = logging.getLogger(__name__)
 
 
 class _HealthCheckWorker(QObject):
@@ -359,25 +362,36 @@ class MainWindow(QMainWindow):
         self._status_bar_widget.set_status(f"Transcribing: {desc} ({frac:.0%})")
 
     def _on_transcribe_finished(self, transcript: dict) -> None:
-        self._status_bar_widget.set_status("Transcription complete")
+        n_segs = len(transcript.get("segments", []))
+        logger.info(
+            "[DIAG] _on_transcribe_finished CALLED: %d segments, duration=%s",
+            n_segs,
+            transcript.get("duration", "?"),
+        )
+        self._status_bar_widget.set_status(f"Transcription complete ({n_segs} segments)")
         self._cleanup_thread()
 
         # Save transcript to disk next to the video file
         transcript_path = str(
             Path(self._current_video_path).with_suffix(".transcript.json")
         )
+        logger.info("[DIAG] Saving transcript to: %s", transcript_path)
         try:
             save_transcript_atomic(transcript_path, transcript)
         except Exception as exc:
+            logger.error("[DIAG] Save transcript FAILED: %s", exc)
             QMessageBox.warning(
                 self, "Error", f"Failed to save transcript:\n{exc}"
             )
             return
 
         # Load transcript into ReviewController so subtitle panel is populated
+        logger.info("[DIAG] Loading transcript into ReviewController...")
         try:
-            self._controller.load_transcript(transcript_path)
+            segments = self._controller.load_transcript(transcript_path)
+            logger.info("[DIAG] ReviewController loaded %d segments", len(segments))
         except Exception as exc:
+            logger.error("[DIAG] Load transcript FAILED: %s", exc)
             QMessageBox.warning(
                 self, "Error", f"Failed to load transcript for review:\n{exc}"
             )
@@ -385,7 +399,9 @@ class MainWindow(QMainWindow):
 
         # Show the first segment in the subtitle panel
         seg = self._controller.current_segment()
+        logger.info("[DIAG] current_segment() = %s", seg)
         if seg:
+            logger.info("[DIAG] Calling _on_segment_changed for segment %d", seg["index"])
             self._on_segment_changed({
                 "index": seg["index"],
                 "total": len(self._controller._segments),
@@ -394,12 +410,15 @@ class MainWindow(QMainWindow):
                 "end": seg["end"],
                 "modified": False,
             })
+        else:
+            logger.warning("[DIAG] current_segment() returned None! No segments to display.")
 
         # Pass transcript to split controller for chapter detection
         self._split_controller.set_transcript(transcript)
         self._split_panel.set_duration(transcript.get("duration", 0.0))
 
     def _on_transcribe_error(self, msg: str) -> None:
+        logger.error("[DIAG] Transcription error: %s", msg)
         QMessageBox.warning(self, "Transcription Error", msg)
         self._status_bar_widget.set_status("Transcription failed")
         self._cleanup_thread()
@@ -656,6 +675,10 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
