@@ -19,6 +19,7 @@ from video_splitter.extractor.engines import (  # noqa: E402
     _cleanup_chunk_files,
     _extract_audio_range,
     load_funasr_model,
+    clear_funasr_model_cache,
     FunASREngine,
     WhisperEngine,
     create_engine,
@@ -268,10 +269,14 @@ class TestExtractAudioRange:
 
 
 class TestLoadFunasrModel:
-    """Tests for load_funasr_model() public API."""
+    """Tests for load_funasr_model() public API with singleton cache."""
+
+    def setup_method(self):
+        """Clear model cache before each test."""
+        clear_funasr_model_cache()
 
     def test_delegates_to_internal_loader(self):
-        """load_funasr_model() delegates to _load_funasr_model()."""
+        """load_funasr_model() delegates to _load_funasr_model() on first call."""
         mock_model = MagicMock()
         with patch(
             "video_splitter.extractor.engines._load_funasr_model",
@@ -281,6 +286,49 @@ class TestLoadFunasrModel:
 
         mock_load.assert_called_once()
         assert result is mock_model
+
+    def test_returns_cached_model_on_second_call(self):
+        """Second call returns cached model without reloading."""
+        mock_model = MagicMock()
+        with patch(
+            "video_splitter.extractor.engines._load_funasr_model",
+            return_value=mock_model,
+        ) as mock_load:
+            result1 = load_funasr_model()
+            result2 = load_funasr_model()
+
+        mock_load.assert_called_once()  # Only called once
+        assert result1 is result2
+        assert result1 is mock_model
+
+    def test_use_cache_false_forces_reload(self):
+        """use_cache=False forces a fresh load even if cached."""
+        mock_model1 = MagicMock()
+        mock_model2 = MagicMock()
+        with patch(
+            "video_splitter.extractor.engines._load_funasr_model",
+            side_effect=[mock_model1, mock_model2],
+        ):
+            result1 = load_funasr_model()
+            result2 = load_funasr_model(use_cache=False)
+
+        assert result1 is mock_model1
+        assert result2 is mock_model2
+
+    def test_clear_cache_forces_reload(self):
+        """clear_funasr_model_cache() forces next call to reload."""
+        mock_model1 = MagicMock()
+        mock_model2 = MagicMock()
+        with patch(
+            "video_splitter.extractor.engines._load_funasr_model",
+            side_effect=[mock_model1, mock_model2],
+        ):
+            result1 = load_funasr_model()
+            clear_funasr_model_cache()
+            result2 = load_funasr_model()
+
+        assert result1 is mock_model1
+        assert result2 is mock_model2
 
 
 # ---------------------------------------------------------------------------

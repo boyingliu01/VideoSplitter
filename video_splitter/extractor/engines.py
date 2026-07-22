@@ -227,8 +227,19 @@ def _extract_audio_range(
     return output_path
 
 
-def load_funasr_model():
+# Module-level model cache (singleton per process)
+_cached_funasr_model = None
+
+
+def load_funasr_model(use_cache: bool = True):
     """Load FunASR AutoModel (public API for streaming worker).
+
+    Uses a module-level singleton cache so the model is only loaded once
+    per process. Subsequent calls return the cached instance immediately.
+
+    Args:
+        use_cache: If True (default), return cached model if available.
+            Set to False to force reload (useful for testing).
 
     Returns:
         Loaded FunASR AutoModel instance.
@@ -236,7 +247,23 @@ def load_funasr_model():
     Raises:
         RuntimeError: If all model keys fail to load.
     """
-    return _load_funasr_model()
+    global _cached_funasr_model
+    if use_cache and _cached_funasr_model is not None:
+        logger.info("Returning cached FunASR model (skip reload)")
+        return _cached_funasr_model
+    model = _load_funasr_model()
+    _cached_funasr_model = model
+    return model
+
+
+def clear_funasr_model_cache():
+    """Clear the cached FunASR model, freeing memory.
+
+    Next call to load_funasr_model() will reload from disk/network.
+    """
+    global _cached_funasr_model
+    _cached_funasr_model = None
+    gc.collect()
 
 
 FUNASR_PUNC_MODEL = os.environ.get(
