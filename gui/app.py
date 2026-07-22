@@ -297,7 +297,9 @@ class MainWindow(QMainWindow):
         # Clean up any previous model loader
         self._cleanup_model_loader_thread()
 
-        self._model_loader = ModelLoaderWorker(parent=None)
+        # Parent = self (MainWindow) so worker survives thread deletion
+        # and its finished signal is reliably delivered to the main thread.
+        self._model_loader = ModelLoaderWorker(parent=self)
         self._model_loader_thread = QThread(self)
         self._model_loader.moveToThread(self._model_loader_thread)
 
@@ -308,7 +310,8 @@ class MainWindow(QMainWindow):
 
         thread: QThread = self._model_loader_thread
         thread.started.connect(self._model_loader.run)  # type: ignore[union-attr]
-        thread.finished.connect(thread.deleteLater)
+        # Do NOT deleteLater on thread.finished — worker (parent=self) manages
+        # its own lifetime. We clean up the thread reference in _on_model_loaded.
         thread.start()
 
     def _on_model_loaded(self, success: bool, message: str) -> None:
@@ -495,9 +498,9 @@ class MainWindow(QMainWindow):
         """Safely stop and clean up the model loader thread."""
         if self._model_loader_thread is not None:
             self._model_loader_thread.quit()
-            self._model_loader_thread.wait(3000)  # 3s timeout
+            self._model_loader_thread.wait(5000)  # 5s timeout for signal delivery
             self._model_loader_thread = None
-            self._model_loader = None
+        # Worker is parented to self, no need to delete
 
     def _on_video_seeked(self, position_ms: int) -> None:
         """Forward video seek position to streaming worker for priority transcription."""
