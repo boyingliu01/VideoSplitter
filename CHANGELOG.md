@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.3 (2026-07-21)
+
+- Add visual progress bar to StatusBarWidget for better user feedback
+- TranscribeWorker now emits granular progress phases:
+  - Audio extraction (0-10%)
+  - Model loading + transcription (10-100%)
+- Status bar shows real-time progress percentage and description
+- Progress bar hides automatically when transcription completes or fails
+- Tests: 69 GUI tests passed
+
 ## 0.5.2 (2026-07-21)
 
 - Fix FunASR segment extraction: support text+timestamp format (FunASR 1.3.x Paraformer)
