@@ -1,15 +1,10 @@
 ---
 kind: dependency_management
 name: Python 依赖管理：requirements.txt + pyproject.toml 双清单模式
+slug: dependency_management
 category: dependency_management
 scope:
     - '**'
-source_files:
-    - requirements.txt
-    - pyproject.toml
-    - .github/workflows/test.yml
-    - ffmpeg-skill/AGENTS.md
-    - package.json
 ---
 
 ## 1. 使用的系统与工具
