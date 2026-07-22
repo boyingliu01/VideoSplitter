@@ -1,0 +1,7 @@
+schema_version: 1
+module_path: 2436de64-54ec-49e0-9105-8edc48e4bb11
+title: 视频分段审阅应用（ffmpeg-skill + video_splitter + gui）
+scope: []
+source_files: []
+depends_on: []
+related_to: []

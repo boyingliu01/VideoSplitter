@@ -1,33 +1,35 @@
 # 知识卡导出索引文件
 schema_version: 1
 locale: zh-CN
-branch: master
+branch: sprint/2026-07-20-test-safety-net
 nodes_managed: true
-exported_at: "2026-07-21T14:21:46Z"
+exported_at: "2026-07-22T10:12:16Z"
 modules:
     "":
-        dir_name: FFmpeg 视频分段审阅应用（根装配层）
-        title: FFmpeg 视频分段审阅应用（根装配层）
+        dir_name: 视频分段审阅应用（ffmpeg-skill + video_splitter + gui）
+        title: 视频分段审阅应用（ffmpeg-skill + video_splitter + gui）
         scope: []
         source_files: []
         children:
-            - 26091068-ff2d-4569-805c-3bf54ec0c621
-            - 706fadf6-000d-4e58-a2f9-66cd8e8f02f1
+            - 2436de64-54ec-49e0-9105-8edc48e4bb11
+            - 34f768d0-5a99-45b0-a883-463b92c374c9
+            - ddbd7fa7-ab0d-441e-b417-43d9b0898b83
         depends_on: []
         related_to: []
-    706fadf6-000d-4e58-a2f9-66cd8e8f02f1:
-        dir_name: OpenCode FFmpeg 视频分段审阅 GUI 应用
-        title: OpenCode FFmpeg 视频分段审阅 GUI 应用
+    34f768d0-5a99-45b0-a883-463b92c374c9:
+        dir_name: FFmpeg 视频处理 OpenCode 技能包
+        title: FFmpeg 视频处理 OpenCode 技能包
         scope:
-            - gui/
+            - ffmpeg-skill/
         source_files: []
         children:
-            - 706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52
+            - 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc
         depends_on: []
-        related_to: []
-    706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52:
-        dir_name: OpenCode FFmpeg 视频处理技能聚合仓库
-        title: OpenCode FFmpeg 视频处理技能聚合仓库
+        related_to:
+            - path: 2436de64-54ec-49e0-9105-8edc48e4bb11/f595ccbb-ab52-4fd4-bcce-b73723a5c6cf
+    34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc:
+        dir_name: FFmpeg Video Skill 聚合工程
+        title: FFmpeg Video Skill 聚合工程
         scope:
             - README.md
             - PROJECT_SUMMARY.md
@@ -63,23 +65,24 @@ modules:
             - _trace4.txt
         source_files: []
         children:
-            - 706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/5c8a1afd-ef76-425b-a951-7c0c62f8dda5
-            - 706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/a688e674-8f52-4145-ab4f-619d6ab8a8ad
-            - 706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/b93b96e8-b7bd-4dca-b5bf-352a1be518db
+            - 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/2d424e2d-2674-45eb-97b0-6f6639bf9fa9
+            - 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/635d48c0-1a60-40eb-ab63-39034f1446ab
+            - 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/acc188c2-70c7-4123-a61e-8b78f9d49bc5
+            - 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/ba0500c3-56d0-40be-8a9c-108bf0702c7e
         depends_on: []
         related_to: []
-    706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/5c8a1afd-ef76-425b-a951-7c0c62f8dda5:
-        dir_name: GUI 单元测试与 FFmpeg Skill 离线评测工作区
-        title: GUI 单元测试与 FFmpeg Skill 离线评测工作区
+    34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/2d424e2d-2674-45eb-97b0-6f6639bf9fa9:
+        dir_name: 流式增量 ASR 转写工作线程
+        title: 流式增量 ASR 转写工作线程
         scope:
-            - tests/
-            - ffmpeg-video-workspace/
-            - skill-cert-results/
+            - gui/workers/streaming_transcribe_worker.py
         source_files: []
         children: []
         depends_on: []
-        related_to: []
-    706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/a688e674-8f52-4145-ab4f-619d6ab8a8ad:
+        related_to:
+            - path: 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/acc188c2-70c7-4123-a61e-8b78f9d49bc5
+            - path: 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/ba0500c3-56d0-40be-8a9c-108bf0702c7e
+    34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/635d48c0-1a60-40eb-ab63-39034f1446ab:
         dir_name: 技能认证脚本与迁移设计文档
         title: 技能认证脚本与迁移设计文档
         scope:
@@ -93,27 +96,51 @@ modules:
         children: []
         depends_on: []
         related_to: []
-    706fadf6-000d-4e58-a2f9-66cd8e8f02f1/c9e1312c-893d-43e4-bb2a-f40794419a52/b93b96e8-b7bd-4dca-b5bf-352a1be518db:
-        dir_name: FFmpeg 视频处理技能包
-        title: FFmpeg 视频处理技能包
+    34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/acc188c2-70c7-4123-a61e-8b78f9d49bc5:
+        dir_name: GUI 单元测试与 FFmpeg Skill 离线评测集
+        title: GUI 单元测试与 FFmpeg Skill 离线评测集
         scope:
-            - ffmpeg-skill/
+            - tests/
+            - ffmpeg-video-workspace/
+            - skill-cert-results/
         source_files: []
         children: []
         depends_on: []
-        related_to: []
-    26091068-ff2d-4569-805c-3bf54ec0c621:
-        dir_name: 视频自动分割流水线（Video Splitter）
-        title: 视频自动分割流水线（Video Splitter）
+        related_to:
+            - path: 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/2d424e2d-2674-45eb-97b0-6f6639bf9fa9
+            - path: 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/ba0500c3-56d0-40be-8a9c-108bf0702c7e
+    34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/ba0500c3-56d0-40be-8a9c-108bf0702c7e:
+        dir_name: FunASR 模型后台加载器
+        title: FunASR 模型后台加载器
         scope:
-            - video_splitter/
+            - gui/workers/model_loader_worker.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/2d424e2d-2674-45eb-97b0-6f6639bf9fa9
+            - path: 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/acc188c2-70c7-4123-a61e-8b78f9d49bc5
+    2436de64-54ec-49e0-9105-8edc48e4bb11:
+        dir_name: 视频分段审阅应用（ffmpeg-skill + video_splitter + gui）
+        title: 视频分段审阅应用（ffmpeg-skill + video_splitter + gui）
+        scope: []
         source_files: []
         children:
-            - 26091068-ff2d-4569-805c-3bf54ec0c621/3e4062a4-bf3a-4f9a-baee-feaf3f2bec10
-            - 26091068-ff2d-4569-805c-3bf54ec0c621/subtitle_burner
+            - 2436de64-54ec-49e0-9105-8edc48e4bb11/f595ccbb-ab52-4fd4-bcce-b73723a5c6cf
         depends_on: []
         related_to: []
-    26091068-ff2d-4569-805c-3bf54ec0c621/3e4062a4-bf3a-4f9a-baee-feaf3f2bec10:
+    2436de64-54ec-49e0-9105-8edc48e4bb11/f595ccbb-ab52-4fd4-bcce-b73723a5c6cf:
+        dir_name: 视频分段审阅 PySide6 GUI（OpenCode Skill）
+        title: 视频分段审阅 PySide6 GUI（OpenCode Skill）
+        scope:
+            - gui/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: 34f768d0-5a99-45b0-a883-463b92c374c9
+            - path: ddbd7fa7-ab0d-441e-b417-43d9b0898b83/0438d74f-ea29-4b9e-a12f-2a81214b50cc
+    ddbd7fa7-ab0d-441e-b417-43d9b0898b83:
         dir_name: 视频分割核心运行时（CLI_流水线_交互式校对）
         title: 视频分割核心运行时（CLI/流水线/交互式校对）
         scope:
@@ -121,10 +148,22 @@ modules:
             - video_splitter/review.py
             - video_splitter/cli.py
         source_files: []
-        children: []
+        children:
+            - ddbd7fa7-ab0d-441e-b417-43d9b0898b83/0438d74f-ea29-4b9e-a12f-2a81214b50cc
         depends_on: []
         related_to: []
-    26091068-ff2d-4569-805c-3bf54ec0c621/subtitle_burner:
+    ddbd7fa7-ab0d-441e-b417-43d9b0898b83/0438d74f-ea29-4b9e-a12f-2a81214b50cc:
+        dir_name: 视频分割流水线（Video Splitter）
+        title: 视频分割流水线（Video Splitter）
+        scope:
+            - video_splitter/
+        source_files: []
+        children:
+            - ddbd7fa7-ab0d-441e-b417-43d9b0898b83/0438d74f-ea29-4b9e-a12f-2a81214b50cc/c19507ee-3062-4411-b28f-d2703ad72ad7
+        depends_on: []
+        related_to:
+            - path: 2436de64-54ec-49e0-9105-8edc48e4bb11/f595ccbb-ab52-4fd4-bcce-b73723a5c6cf
+    ddbd7fa7-ab0d-441e-b417-43d9b0898b83/0438d74f-ea29-4b9e-a12f-2a81214b50cc/c19507ee-3062-4411-b28f-d2703ad72ad7:
         dir_name: 字幕硬烧入视频分段工具
         title: 字幕硬烧入视频分段工具
         scope:

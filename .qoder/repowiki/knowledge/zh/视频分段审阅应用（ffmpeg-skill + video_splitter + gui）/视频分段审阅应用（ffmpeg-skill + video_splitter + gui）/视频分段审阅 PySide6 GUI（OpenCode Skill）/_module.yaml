@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: 2436de64-54ec-49e0-9105-8edc48e4bb11/f595ccbb-ab52-4fd4-bcce-b73723a5c6cf
+title: 视频分段审阅 PySide6 GUI（OpenCode Skill）
+scope:
+    - gui/
+source_files: []
+depends_on: []
+related_to:
+    - path: 34f768d0-5a99-45b0-a883-463b92c374c9
+    - path: ddbd7fa7-ab0d-441e-b417-43d9b0898b83/0438d74f-ea29-4b9e-a12f-2a81214b50cc

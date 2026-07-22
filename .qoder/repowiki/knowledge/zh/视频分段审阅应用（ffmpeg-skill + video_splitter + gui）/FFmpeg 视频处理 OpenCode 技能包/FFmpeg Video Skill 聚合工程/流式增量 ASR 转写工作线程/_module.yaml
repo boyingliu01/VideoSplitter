@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/2d424e2d-2674-45eb-97b0-6f6639bf9fa9
+title: 流式增量 ASR 转写工作线程
+scope:
+    - gui/workers/streaming_transcribe_worker.py
+source_files: []
+depends_on: []
+related_to:
+    - path: 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/acc188c2-70c7-4123-a61e-8b78f9d49bc5
+    - path: 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/ba0500c3-56d0-40be-8a9c-108bf0702c7e
