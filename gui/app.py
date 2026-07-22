@@ -28,6 +28,7 @@ from gui.workers.detect_worker import DetectChaptersWorker
 from gui.workers.split_worker import SplitWorker
 from gui.workers.transcribe_worker import TranscribeWorker
 from gui.workers.streaming_transcribe_worker import StreamingTranscribeWorker
+from gui.workers.model_loader_worker import ModelLoaderWorker
 from video_splitter.extractor.engines import FunASREngine
 from video_splitter.review import save_transcript_atomic
 
@@ -68,6 +69,11 @@ class MainWindow(QMainWindow):
         # StreamingTranscribeWorker lifecycle (streaming ASR)
         self._streaming_worker: StreamingTranscribeWorker | None = None
         self._streaming_thread: QThread | None = None
+
+        # ModelLoaderWorker lifecycle (pre-load ASR model)
+        self._model_loader: ModelLoaderWorker | None = None
+        self._model_loader_thread: QThread | None = None
+        self._pending_video_path: str = ""  # Video path waiting for model
 
         # DetectChaptersWorker lifecycle
         self._detect_worker: DetectChaptersWorker | None = None
@@ -279,10 +285,46 @@ class MainWindow(QMainWindow):
         self._split_controller.set_video_path(path)
 
         QApplication.restoreOverrideCursor()
-        self._status_bar_widget.set_progress(0.0, "Starting streaming transcription...")
+        self._status_bar_widget.set_progress(0.0, "Loading speech recognition model...")
         self._subtitle_panel.set_transcription_status("Initializing speech recognition...")
 
-        # Use StreamingTranscribeWorker for incremental ASR
+        # Phase 1: Pre-load model in a dedicated thread (prevents UI freeze)
+        self._pending_video_path = path
+        self._start_model_loader()
+
+    def _start_model_loader(self) -> None:
+        """Start ModelLoaderWorker to pre-load FunASR model."""
+        # Clean up any previous model loader
+        self._cleanup_model_loader_thread()
+
+        self._model_loader = ModelLoaderWorker(parent=None)
+        self._model_loader_thread = QThread(self)
+        self._model_loader.moveToThread(self._model_loader_thread)
+
+        self._model_loader.progress.connect(
+            lambda msg: self._subtitle_panel.set_transcription_status(msg)
+        )
+        self._model_loader.finished.connect(self._on_model_loaded)
+
+        thread: QThread = self._model_loader_thread
+        thread.started.connect(self._model_loader.run)  # type: ignore[union-attr]
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+    def _on_model_loaded(self, success: bool, message: str) -> None:
+        """Model loaded — now start streaming transcription."""
+        self._cleanup_model_loader_thread()
+
+        if not success:
+            self._on_streaming_error(message)
+            return
+
+        # Phase 2: Start streaming transcription (model is now cached)
+        self._status_bar_widget.set_progress(0.0, "Starting streaming transcription...")
+        self._start_streaming_transcription(self._pending_video_path)
+
+    def _start_streaming_transcription(self, path: str) -> None:
+        """Start the StreamingTranscribeWorker (model already cached)."""
         self._streaming_worker = StreamingTranscribeWorker("funasr", parent=None)
         self._streaming_thread = QThread(self)
         self._streaming_worker.moveToThread(self._streaming_thread)
@@ -448,6 +490,14 @@ class MainWindow(QMainWindow):
             self._streaming_thread.wait()
             self._streaming_thread = None
             self._streaming_worker = None
+
+    def _cleanup_model_loader_thread(self) -> None:
+        """Safely stop and clean up the model loader thread."""
+        if self._model_loader_thread is not None:
+            self._model_loader_thread.quit()
+            self._model_loader_thread.wait(3000)  # 3s timeout
+            self._model_loader_thread = None
+            self._model_loader = None
 
     def _on_video_seeked(self, position_ms: int) -> None:
         """Forward video seek position to streaming worker for priority transcription."""
