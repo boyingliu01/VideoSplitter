@@ -119,7 +119,14 @@ class StreamingTranscribeWorker(QObject):
         )
 
         # While FFmpeg runs, load the model in current thread
-        model = load_funasr_model()
+        # If model is already cached (pre-loaded by ModelLoaderWorker),
+        # this returns instantly.
+        self.model_loading_progress.emit("Loading speech recognition model...")
+        model = load_funasr_model(use_cache=True)
+        if model is None:
+            # Cache miss — force load (shouldn't happen if ModelLoaderWorker ran first)
+            self.model_loading_progress.emit("Model not cached, loading from disk...")
+            model = load_funasr_model(use_cache=False)
         self.model_loading_progress.emit("Model loaded successfully")
 
         # Wait for FFmpeg to finish
