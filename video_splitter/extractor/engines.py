@@ -241,9 +241,12 @@ class FunASREngine(TranscriptionEngine):
             Dict with ``language``, ``duration``, ``segments``.
         """
         if progress_callback:
-            progress_callback(0.0, "Loading FunASR model...")
+            progress_callback(0.0, "Loading speech recognition model (first time may take minutes)...")
 
         model = _load_funasr_model()
+
+        if progress_callback:
+            progress_callback(0.05, "Model loaded, preparing transcription...")
 
         # Determine total duration for progress reporting and chunking
         # decision.  Gracefully fall back to single-call mode if ffprobe
@@ -386,12 +389,12 @@ class FunASREngine(TranscriptionEngine):
     ) -> Dict[str, Any]:
         """Transcribe a short audio file in a single generate() call."""
         if progress_callback:
-            progress_callback(0.1, "Transcribing...")
+            progress_callback(0.1, "Running speech recognition...")
 
         result = model.generate(input=audio_path)
 
         if progress_callback:
-            progress_callback(0.8, "Processing results...")
+            progress_callback(0.8, "Processing recognition results...")
 
         segments = self._extract_segments(result)
         # Use last segment's end time if available, otherwise use total_duration
@@ -418,7 +421,7 @@ class FunASREngine(TranscriptionEngine):
         )
 
         if progress_callback:
-            progress_callback(0.05, f"Splitting audio into {n_chunks} chunks...")
+            progress_callback(0.05, f"Splitting audio into {n_chunks} segments for processing...")
 
         chunks = _read_wav_chunks(audio_path, FUNASR_CHUNK_SECONDS)
         all_segments: List[Dict[str, Any]] = []
@@ -426,10 +429,11 @@ class FunASREngine(TranscriptionEngine):
         try:
             for i, (chunk_path, offset, _dur) in enumerate(chunks):
                 frac = 0.1 + 0.7 * (i / len(chunks))
+                elapsed_min = f"{i}/{len(chunks)}"
                 if progress_callback:
                     progress_callback(
                         frac,
-                        f"Transcribing chunk {i + 1}/{len(chunks)}...",
+                        f"Recognizing speech: segment {i + 1}/{len(chunks)} ({elapsed_min})...",
                     )
 
                 result = model.generate(input=chunk_path)
@@ -456,7 +460,7 @@ class FunASREngine(TranscriptionEngine):
             _cleanup_chunk_files(chunks)
 
         if progress_callback:
-            progress_callback(0.9, "Processing results...")
+            progress_callback(0.9, "Finalizing transcription results...")
 
         duration = all_segments[-1]["end"] if all_segments else total_duration
 

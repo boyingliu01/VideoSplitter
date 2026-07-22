@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.4 (2026-07-21)
+
+- Improve progress bar visibility and clarity:
+  - Progress bar height increased from 16px to 22px for better visibility
+  - Status label uses bold font for clearer readability
+  - Progress descriptions now show step-by-step pipeline stages:
+    - Step 1/3: Extracting audio from video...
+    - Step 2/3: Loading speech recognition model...
+    - Step 3/3: Transcribing audio to text...
+  - Long audio transcription shows per-segment progress
+  - Model loading warns user if first time (may take minutes)
+- Tests: all GUI + core tests pass
+
 ## 0.5.3 (2026-07-21)
 
 - Add visual progress bar to StatusBarWidget for better user feedback

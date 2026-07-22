@@ -263,14 +263,14 @@ class MainWindow(QMainWindow):
 
         # Show wait cursor and immediate feedback
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
-        self._status_bar_widget.show_progress("Loading video...")
+        self._status_bar_widget.show_progress("Loading video file...")
 
         self._video_player.load_video(path)
         self._split_panel.set_video_path(path)
         self._split_controller.set_video_path(path)
 
         QApplication.restoreOverrideCursor()
-        self._status_bar_widget.set_progress(0.0, "Preparing transcription...")
+        self._status_bar_widget.set_progress(0.0, "Starting transcription pipeline...")
 
         self._worker = TranscribeWorker("funasr", parent=None)
         self._worker_thread = QThread(self)
@@ -365,7 +365,7 @@ class MainWindow(QMainWindow):
         n_segs = len(transcript.get("segments", []))
         logger.info("Transcription complete: %d segments", n_segs)
         self._status_bar_widget.hide_progress()
-        self._status_bar_widget.set_status(f"Transcription complete ({n_segs} segments)")
+        self._status_bar_widget.set_status(f"Ready - {n_segs} subtitle segments loaded")
         self._cleanup_thread()
 
         # Save transcript to disk next to the video file
@@ -413,7 +413,7 @@ class MainWindow(QMainWindow):
         logger.error("Transcription error: %s", msg)
         self._status_bar_widget.hide_progress()
         QMessageBox.warning(self, "Transcription Error", msg)
-        self._status_bar_widget.set_status("Transcription failed")
+        self._status_bar_widget.set_status("Transcription failed - see error for details")
         self._cleanup_thread()
 
     def _cleanup_thread(self) -> None:
