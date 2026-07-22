@@ -1,0 +1,39 @@
+schema_version: 1
+module_path: 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc
+title: FFmpeg Video Skill 聚合工程
+scope:
+    - README.md
+    - PROJECT_SUMMARY.md
+    - COMPLETION_REPORT.md
+    - OPENCODE_SETUP.md
+    - architecture.yaml
+    - pyproject.toml
+    - requirements.txt
+    - package.json
+    - install.sh
+    - install.bat
+    - skill.md
+    - .code-walkthrough-result.json
+    - .coverage
+    - .gitignore
+    - AGENTS.md
+    - CHANGELOG.md
+    - VERSION
+    - _bg_error.txt
+    - _bg_error2.txt
+    - _bg_output.txt
+    - _bg_output2.txt
+    - _run_cert.py
+    - _run_cert2.py
+    - _run_cert3.py
+    - _run_cert4.py
+    - _run_cert5.py
+    - _run_cert_bg.py
+    - _run_cert_bg2.py
+    - _run_cert_output.txt
+    - _trace.txt
+    - _trace3.txt
+    - _trace4.txt
+source_files: []
+depends_on: []
+related_to: []

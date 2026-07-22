@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: 34f768d0-5a99-45b0-a883-463b92c374c9
+title: FFmpeg 视频处理 OpenCode 技能包
+scope:
+    - ffmpeg-skill/
+source_files: []
+depends_on: []
+related_to:
+    - path: 2436de64-54ec-49e0-9105-8edc48e4bb11/f595ccbb-ab52-4fd4-bcce-b73723a5c6cf

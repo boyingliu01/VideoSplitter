@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: 34f768d0-5a99-45b0-a883-463b92c374c9/0392bed7-5089-4674-bd98-df654afac3fc/635d48c0-1a60-40eb-ab63-39034f1446ab
+title: 技能认证脚本与迁移设计文档
+scope:
+    - docs/
+    - .opencode/
+    - _run_cert*.py
+    - _bg_output*.txt
+    - _trace*.txt
+    - _pr_body.txt
+source_files: []
+depends_on: []
+related_to: []
