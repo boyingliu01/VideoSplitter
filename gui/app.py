@@ -94,6 +94,10 @@ class MainWindow(QMainWindow):
         # Track split output for subtitle burning
         self._split_output_files: list[str] = []
 
+        # Hotword string for ASR enhancement (loaded from document)
+        self._hotword: str = ""
+        self._hotword_file_path: str = ""
+
         self._build_menu()
         self._build_central()
         self._build_status()
@@ -119,6 +123,12 @@ class MainWindow(QMainWindow):
         export_chapters_action = QAction("Export &Chapters...", self)
         export_chapters_action.triggered.connect(self._on_export_chapters)
         file_menu.addAction(export_chapters_action)
+
+        file_menu.addSeparator()
+
+        open_hotword_action = QAction("Open Hot&word Document...", self)
+        open_hotword_action.triggered.connect(self._on_open_hotword)
+        file_menu.addAction(open_hotword_action)
 
         file_menu.addSeparator()
 
@@ -328,7 +338,14 @@ class MainWindow(QMainWindow):
 
     def _start_streaming_transcription(self, path: str) -> None:
         """Start the StreamingTranscribeWorker (model already cached)."""
-        self._streaming_worker = StreamingTranscribeWorker("funasr", parent=None)
+        # Also try loading hotwords from environment if not already set via GUI
+        if not self._hotword:
+            from video_splitter.extractor.hotwords import load_hotwords_from_env
+            self._hotword = load_hotwords_from_env()
+
+        self._streaming_worker = StreamingTranscribeWorker(
+            "funasr", parent=None, hotword=self._hotword
+        )
         self._streaming_thread = QThread(self)
         self._streaming_worker.moveToThread(self._streaming_thread)
 
@@ -378,6 +395,41 @@ class MainWindow(QMainWindow):
         # Pass transcript to split controller for chapter detection
         self._split_controller.set_transcript(self._controller.get_transcript())
         self._status_bar_widget.set_status(f"Loaded transcript: {path}")
+
+    def _on_open_hotword(self) -> None:
+        """Open a hotword document to improve ASR accuracy."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Hotword Document",
+            "",
+            "Text Files (*.txt);;Word Documents (*.docx);;PDF Files (*.pdf);;All Files (*.*)",
+        )
+        if not path:
+            return
+
+        from video_splitter.extractor.hotwords import load_hotwords_from_file
+
+        try:
+            hotwords = load_hotwords_from_file(path)
+            if not hotwords:
+                QMessageBox.warning(
+                    self, "Warning",
+                    "No hotwords extracted from the document.\n"
+                    "Check the file format and content."
+                )
+                return
+
+            self._hotword = hotwords
+            self._hotword_file_path = path
+            word_count = len(hotwords.split())
+            self._status_bar_widget.set_status(
+                f"Loaded {word_count} hotwords from: {os.path.basename(path)}"
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Error",
+                f"Failed to load hotword document:\n{exc}"
+            )
 
     def _on_save_next(self) -> None:
         seg = self._controller.current_segment()

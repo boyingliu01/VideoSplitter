@@ -52,11 +52,13 @@ class StreamingTranscribeWorker(QObject):
         engine_name: str = "funasr",
         config: Optional[SplitConfig] = None,
         parent: QObject | None = None,
+        hotword: str = "",
     ) -> None:
         super().__init__(parent)
         self._engine_name = engine_name
         self._config = config if config is not None else SplitConfig()
         self._chunk_seconds: int = FUNASR_CHUNK_SECONDS
+        self._hotword = hotword  # Space-separated hotword string for ASR enhancement
 
         # State (only accessed from worker thread, except priority/cancel)
         self._priority_chunk_index: int = -1  # -1 = no priority request
@@ -205,7 +207,11 @@ class StreamingTranscribeWorker(QObject):
                     continue
 
                 try:
-                    result = model.generate(input=chunk_wav)
+                    generate_kwargs: dict = {"input": chunk_wav}
+                    if self._hotword:
+                        generate_kwargs["hotword"] = self._hotword
+
+                    result = model.generate(**generate_kwargs)
                     new_segments = engine._extract_segments(result)
 
                     # Offset timestamps to global timeline
