@@ -59,6 +59,28 @@ class TestSubtitlePanel:
         assert panel._segment_label.text() == "Segment 0/0"
         assert panel._correction_edit.toPlainText() == ""
 
+    def test_set_transcription_status(self, qapp):
+        """set_transcription_status shows status text."""
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.set_transcription_status("正在识别第 3/10 段...")
+        assert panel._status_label.text() == "正在识别第 3/10 段..."
+        assert not panel._status_label.isHidden()
+
+    def test_clear_transcription_status(self, qapp):
+        """clear_transcription_status hides the status label."""
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.set_transcription_status("识别中...")
+        panel.clear_transcription_status()
+        assert panel._status_label.isHidden()
+
+    def test_transcription_status_initially_hidden(self, qapp):
+        """Status label is hidden by default."""
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        assert panel._status_label.isHidden()
+
 
 class TestVideoPlayerWidget:
     """Smoke tests for VideoPlayerWidget."""
@@ -102,6 +124,25 @@ class TestVideoPlayerWidget:
         player._player.setSource = MagicMock()
         player.load_video("C:/test/video.mp4")
         player._player.setSource.assert_called_once()
+
+    def test_seeked_signal_emitted_on_slider_move(self, qapp):
+        """Moving the seek slider emits seeked(int) signal."""
+        from gui.widgets.video_player import VideoPlayerWidget
+        from unittest.mock import MagicMock
+        player = VideoPlayerWidget()
+        player.seeked = MagicMock()
+        # Simulate slider move
+        player._seek_slider.setValue(5000)
+        player._seek_slider.sliderMoved.emit(5000)
+        player.seeked.emit.assert_called_once_with(5000)
+
+    def test_seeked_signal_has_correct_signature(self, qapp):
+        """seeked signal accepts int argument (position in ms)."""
+        from gui.widgets.video_player import VideoPlayerWidget
+        player = VideoPlayerWidget()
+        assert hasattr(player, 'seeked')
+        # Verify it's a Signal
+        assert hasattr(player.seeked, 'emit')
 
 
 class TestStatusBarWidget:

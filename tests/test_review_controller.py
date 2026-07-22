@@ -251,3 +251,125 @@ class TestExportSrt:
             mock_mkstemp.return_value = (99, str(tmp_path / "tmp_export.srt"))
             with pytest.raises(OSError, match="permission denied"):
                 ctrl.export_srt()
+
+
+class TestMergeSegments:
+    """Tests for merge_segments() — incremental segment ingestion from streaming ASR."""
+
+    def test_merge_into_empty(self):
+        """Merging into empty segments adds all new segments."""
+        ctrl = ReviewController()
+        ctrl.segments_merged = MagicMock()
+        new_segs = [
+            {"text": "hello", "start": 0.0, "end": 5.0},
+            {"text": "world", "start": 5.0, "end": 10.0},
+        ]
+        ctrl.merge_segments(new_segs)
+        assert len(ctrl._segments) == 2
+        assert ctrl._segments[0]["text"] == "hello"
+        assert ctrl._segments[1]["text"] == "world"
+
+    def test_merge_appends_non_overlapping(self):
+        """New segments after existing ones are appended in order."""
+        ctrl = ReviewController()
+        ctrl.segments_merged = MagicMock()
+        ctrl._segments = [
+            {"text": "a", "start": 0.0, "end": 5.0},
+        ]
+        new_segs = [
+            {"text": "b", "start": 10.0, "end": 15.0},
+            {"text": "c", "start": 15.0, "end": 20.0},
+        ]
+        ctrl.merge_segments(new_segs)
+        assert len(ctrl._segments) == 3
+        assert ctrl._segments[-1]["text"] == "c"
+
+    def test_merge_deduplicates_overlapping(self):
+        """New segments overlapping with existing tail are skipped."""
+        ctrl = ReviewController()
+        ctrl.segments_merged = MagicMock()
+        ctrl._segments = [
+            {"text": "a", "start": 0.0, "end": 30.0},
+        ]
+        new_segs = [
+            {"text": "overlap", "start": 28.0, "end": 35.0},  # overlaps
+            {"text": "new", "start": 31.0, "end": 40.0},       # no overlap
+        ]
+        ctrl.merge_segments(new_segs)
+        assert len(ctrl._segments) == 2
+        assert ctrl._segments[1]["text"] == "new"
+
+    def test_merge_inserts_in_sorted_order(self):
+        """New segments appended after existing maintain start-time order."""
+        ctrl = ReviewController()
+        ctrl.segments_merged = MagicMock()
+        ctrl._segments = [
+            {"text": "a", "start": 0.0, "end": 5.0},
+            {"text": "b", "start": 5.0, "end": 10.0},
+        ]
+        # Streaming ASR always adds segments at the tail
+        new_segs = [
+            {"text": "c", "start": 10.0, "end": 15.0},
+            {"text": "d", "start": 15.0, "end": 20.0},
+        ]
+        ctrl.merge_segments(new_segs)
+        assert len(ctrl._segments) == 4
+        # Verify sorted order
+        starts = [s["start"] for s in ctrl._segments]
+        assert starts == sorted(starts)
+        assert ctrl._segments[-1]["text"] == "d"
+
+    def test_merge_preserves_current_index(self):
+        """merge_segments does not change _current_index."""
+        ctrl = ReviewController()
+        ctrl.segments_merged = MagicMock()
+        ctrl._segments = [
+            {"text": "a", "start": 0.0, "end": 5.0},
+            {"text": "b", "start": 10.0, "end": 15.0},
+        ]
+        ctrl._current_index = 1  # viewing segment 1
+        new_segs = [
+            {"text": "c", "start": 20.0, "end": 25.0},
+        ]
+        ctrl.merge_segments(new_segs)
+        assert ctrl._current_index == 1  # unchanged
+
+    def test_merge_emits_signal_with_count(self):
+        """segments_merged signal emits the number of new segments added."""
+        ctrl = ReviewController()
+        ctrl.segments_merged = MagicMock()
+        new_segs = [
+            {"text": "a", "start": 0.0, "end": 5.0},
+            {"text": "b", "start": 5.0, "end": 10.0},
+            {"text": "c", "start": 10.0, "end": 15.0},
+        ]
+        ctrl.merge_segments(new_segs)
+        ctrl.segments_merged.emit.assert_called_once_with(3)
+
+    def test_merge_empty_list_no_signal(self):
+        """Merging empty list does not emit signal."""
+        ctrl = ReviewController()
+        ctrl.segments_merged = MagicMock()
+        ctrl.merge_segments([])
+        ctrl.segments_merged.emit.assert_not_called()
+
+    def test_merge_multiple_batches(self):
+        """Multiple merge calls accumulate segments correctly."""
+        ctrl = ReviewController()
+        ctrl.segments_merged = MagicMock()
+        # Batch 1
+        ctrl.merge_segments([
+            {"text": "a", "start": 0.0, "end": 5.0},
+        ])
+        # Batch 2
+        ctrl.merge_segments([
+            {"text": "b", "start": 5.0, "end": 10.0},
+        ])
+        # Batch 3 (overlapping with batch 2 tail)
+        ctrl.merge_segments([
+            {"text": "overlap", "start": 9.0, "end": 12.0},  # skipped
+            {"text": "c", "start": 11.0, "end": 15.0},
+        ])
+        assert len(ctrl._segments) == 3
+        texts = [s["text"] for s in ctrl._segments]
+        assert texts == ["a", "b", "c"]

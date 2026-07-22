@@ -433,3 +433,126 @@ class TestCancelCleanup:
         with patch("gui.app.QMessageBox") as MockMsg:
             win._on_start_split("/tmp/out")
             MockMsg.warning.assert_called_once()
+
+
+# ── Streaming transcription integration ───────────────────────────────────
+
+class TestStreamingIntegration:
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_streaming_audio_ready(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._split_panel.set_duration = MagicMock()
+        win._on_streaming_audio_ready(120.0)
+        assert win._controller._duration == 120.0
+        win._split_panel.set_duration.assert_called_once_with(120.0)
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_streaming_segments_ready_merges(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._controller.merge_segments = MagicMock()
+        new_segs = [{"text": "hello", "start": 0.0, "end": 5.0}]
+        win._on_streaming_segments_ready(new_segs)
+        win._controller.merge_segments.assert_called_once_with(new_segs)
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_streaming_chunk_completed_updates_progress(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._on_streaming_chunk_completed(2, 5)
+        assert "2/5" in win._status_bar_widget._label.text()
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_streaming_error(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._cleanup_streaming_thread = MagicMock()
+        with patch("gui.app.QMessageBox") as MockMsg:
+            win._on_streaming_error("Model crashed")
+            MockMsg.warning.assert_called_once()
+        win._cleanup_streaming_thread.assert_called_once()
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_streaming_cancelled(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._cleanup_streaming_thread = MagicMock()
+        win._on_streaming_cancelled()
+        win._cleanup_streaming_thread.assert_called_once()
+        assert "cancelled" in win._status_bar_widget._label.text().lower()
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_video_seeked_forwards_priority(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        mock_worker = MagicMock()
+        win._streaming_worker = mock_worker
+        win._on_video_seeked(45000)  # 45 seconds
+        mock_worker.request_priority.assert_called_once_with(45.0)
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_video_seeked_no_worker(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        assert win._streaming_worker is None
+        win._on_video_seeked(45000)  # Should not raise
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_cleanup_streaming_thread_none(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._cleanup_streaming_thread()  # Should not raise
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_cancel_streaming(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        mock_worker = MagicMock()
+        win._streaming_worker = mock_worker
+        win._on_cancel_operation()
+        mock_worker.cancel.assert_called_once()
+
+    @patch("gui.app.save_transcript_atomic")
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_streaming_complete_preserves_user_corrections(
+        self, mock_hc, mock_save, qapp, tmp_path
+    ):
+        """User corrections made during streaming must survive completion."""
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._cleanup_streaming_thread = MagicMock()
+        fake_video = str(tmp_path / "test.mp4")
+        with open(fake_video, "wb") as f:
+            f.write(b"\x00")
+        win._current_video_path = fake_video
+
+        # Simulate streaming: merge some segments
+        win._controller.merge_segments([
+            {"text": "original text", "start": 0.0, "end": 10.0},
+            {"text": "second segment", "start": 10.0, "end": 20.0},
+        ])
+
+        # User corrects the first segment
+        win._controller._transcript_path = str(tmp_path / "test.transcript.json")
+        win._controller.save_correction("corrected text", 0)
+        assert win._controller._segments[0]["text"] == "corrected text"
+        assert 0 in win._controller._modified_indices
+
+        # Streaming completes — should NOT reload from disk
+        worker_transcript = {
+            "language": "zh",
+            "duration": 20.0,
+            "segments": [
+                {"text": "original text", "start": 0.0, "end": 10.0},
+                {"text": "second segment", "start": 10.0, "end": 20.0},
+            ],
+        }
+        win._on_streaming_complete(worker_transcript)
+
+        # KEY ASSERTION: user correction is preserved
+        assert win._controller._segments[0]["text"] == "corrected text"
+        assert 0 in win._controller._modified_indices
+        # Saved transcript should contain corrected text
+        saved = mock_save.call_args[0][1]
+        assert saved["segments"][0]["text"] == "corrected text"

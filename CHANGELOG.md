@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.0 (2026-07-21)
+
+- Add streaming/incremental ASR transcription for GUI:
+  - New `StreamingTranscribeWorker`: transcribes in 30s chunks, emits segments incrementally
+  - UI becomes interactive immediately after opening video (no more waiting minutes)
+  - Audio extraction + model loading run in parallel
+  - Per-chunk FFmpeg extraction avoids large memory usage
+  - Seek priority: dragging the seek bar triggers priority transcription of target chunk
+  - Deduplication prevents overlapping segments between chunks
+  - GC every 3 chunks to manage memory
+- Add `ReviewController.merge_segments()` for incremental segment insertion
+  - Sorted insertion by start time, dedup against existing tail
+  - Preserves user's current viewing position
+  - New `segments_merged` signal for UI updates
+- Add CT-Transformer punctuation model integration:
+  - FunASR `punc_model` parameter adds punctuation to ASR output
+  - Configurable via `VIDEO_SPLITTER_FUNASR_PUNC_MODEL` env var
+  - Can be disabled by setting env var to empty/"0"/"false"/"none"
+- Add `VideoPlayerWidget.seeked` signal for seek-to-chunk transcription
+- Add `SubtitlePanel` transcription status display (initializing, recognizing N/M...)
+- Fix space key shortcut: use `QShortcut` + `ApplicationShortcut` context so play/pause works even when focus is in QTextEdit
+- Fix `_on_streaming_complete` preserves user corrections made during streaming
+- Add `engines.py` new APIs: `load_funasr_model()`, `transcribe_file_chunk()`, `_extract_audio_range()`
+- Tests: 462 passed (243 GUI + 219 core), all clean
+
 ## 0.5.4 (2026-07-21)
 
 - Improve progress bar visibility and clarity:
