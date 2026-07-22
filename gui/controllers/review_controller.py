@@ -23,6 +23,7 @@ class ReviewController(QObject):
     segment_changed = Signal(dict)
     progress_loaded = Signal(dict)
     transcript_saved = Signal()
+    segments_merged = Signal(int)  # number of new segments added
     error = Signal(str)
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -177,3 +178,41 @@ class ReviewController(QObject):
             "modified_count": len(self._modified_indices),
             "modified_indices": list(self._modified_indices),
         })
+
+    def merge_segments(self, new_segments: list[dict]) -> None:
+        """Merge new segments from streaming ASR into existing segments.
+
+        Inserts new segments in start-time order, deduplicating against
+        the existing tail. Does not change _current_index.
+
+        Args:
+            new_segments: List of segment dicts with 'text', 'start', 'end'.
+        """
+        if not new_segments:
+            return
+
+        added = 0
+        for seg in new_segments:
+            # Deduplicate: skip if overlapping with existing tail
+            if self._segments:
+                last_end = self._segments[-1]["end"]
+                if seg["start"] < last_end - 0.5:
+                    continue
+
+            # Insert in sorted order by start time
+            insert_pos = len(self._segments)
+            for i, existing in enumerate(self._segments):
+                if seg["start"] < existing["start"]:
+                    insert_pos = i
+                    break
+
+            self._segments.insert(insert_pos, seg)
+
+            # Adjust current_index if insertion is before it
+            if insert_pos <= self._current_index:
+                self._current_index += 1
+
+            added += 1
+
+        if added > 0:
+            self.segments_merged.emit(added)

@@ -67,6 +67,11 @@ class SubtitlePanel(QWidget):
         self._save_btn = QPushButton("保存", self)
         self._save_btn.clicked.connect(self.save_requested.emit)
 
+        self._status_label = QLabel("", self)
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._status_label.setVisible(False)
+        self._status_label.setStyleSheet("color: #666; font-style: italic;")
+
         header_layout = QVBoxLayout()
         header_layout.addWidget(self._segment_label)
         header_layout.addWidget(self._timestamp_label)
@@ -87,6 +92,7 @@ class SubtitlePanel(QWidget):
         layout.addWidget(QLabel("修正:", self))
         layout.addWidget(self._correction_edit)
         layout.addSpacing(8)
+        layout.addWidget(self._status_label)
         layout.addLayout(nav_layout)
 
     def _on_text_changed(self) -> None:
@@ -132,3 +138,13 @@ class SubtitlePanel(QWidget):
         self._original_label.setText("")
         self._correction_edit.clear()
         self.set_modified(False)
+        self.clear_transcription_status()
+
+    def set_transcription_status(self, text: str) -> None:
+        """Show a transcription status message (e.g. '正在识别第 3/10 段...')."""
+        self._status_label.setText(text)
+        self._status_label.setVisible(True)
+
+    def clear_transcription_status(self) -> None:
+        """Hide the transcription status message."""
+        self._status_label.setVisible(False)

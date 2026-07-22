@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QUrl, QObject, Signal, Slot
-from PySide6.QtGui import QAction, QCursor, QDesktopServices, QKeySequence
+from PySide6.QtGui import QAction, QCursor, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -27,6 +27,7 @@ from gui.workers.burn_worker import BurnWorker
 from gui.workers.detect_worker import DetectChaptersWorker
 from gui.workers.split_worker import SplitWorker
 from gui.workers.transcribe_worker import TranscribeWorker
+from gui.workers.streaming_transcribe_worker import StreamingTranscribeWorker
 from video_splitter.extractor.engines import FunASREngine
 from video_splitter.review import save_transcript_atomic
 
@@ -60,9 +61,13 @@ class MainWindow(QMainWindow):
         self._controller = ReviewController(self)
         self._split_controller = SplitController(parent=self)
 
-        # TranscribeWorker lifecycle
+        # TranscribeWorker lifecycle (legacy batch worker)
         self._worker: TranscribeWorker | None = None
         self._worker_thread: QThread | None = None
+
+        # StreamingTranscribeWorker lifecycle (streaming ASR)
+        self._streaming_worker: StreamingTranscribeWorker | None = None
+        self._streaming_thread: QThread | None = None
 
         # DetectChaptersWorker lifecycle
         self._detect_worker: DetectChaptersWorker | None = None
@@ -151,6 +156,9 @@ class MainWindow(QMainWindow):
 
         vp.position_changed.connect(self._on_position_changed)
 
+        # Seek → streaming worker priority request
+        vp.seeked.connect(self._on_video_seeked)
+
         sp.prev_requested.connect(ctrl.prev)
         sp.save_next_requested.connect(self._on_save_next)
         sp.jump_requested.connect(lambda n: ctrl.jump_to(n - 1))
@@ -193,10 +201,11 @@ class MainWindow(QMainWindow):
         sc.error.connect(self._on_split_error)
 
     def _setup_shortcuts(self) -> None:
-        self._space_action = QAction(self)
-        self._space_action.setShortcut(QKeySequence(Qt.Key.Key_Space))
-        self._space_action.triggered.connect(self._video_player._toggle_play_pause)
-        self.addAction(self._space_action)
+        # Use QShortcut with ApplicationShortcut context so space works
+        # even when focus is in QTextEdit (subtitle correction editor)
+        space_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
+        space_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        space_shortcut.activated.connect(self._video_player._toggle_play_pause)
 
         save_next_action = QAction(self)
         save_next_action.setShortcut(QKeySequence("Ctrl+Return"))
@@ -270,17 +279,27 @@ class MainWindow(QMainWindow):
         self._split_controller.set_video_path(path)
 
         QApplication.restoreOverrideCursor()
-        self._status_bar_widget.set_progress(0.0, "Starting transcription pipeline...")
+        self._status_bar_widget.set_progress(0.0, "Starting streaming transcription...")
+        self._subtitle_panel.set_transcription_status("Initializing speech recognition...")
 
-        self._worker = TranscribeWorker("funasr", parent=None)
-        self._worker_thread = QThread(self)
-        self._worker.moveToThread(self._worker_thread)
+        # Use StreamingTranscribeWorker for incremental ASR
+        self._streaming_worker = StreamingTranscribeWorker("funasr", parent=None)
+        self._streaming_thread = QThread(self)
+        self._streaming_worker.moveToThread(self._streaming_thread)
 
-        self._worker.progress.connect(self._on_transcribe_progress)
-        self._worker.finished.connect(self._on_transcribe_finished)
-        self._worker.error.connect(self._on_transcribe_error)
-        thread: QThread = self._worker_thread
-        thread.started.connect(lambda: self._worker.run(path))  # type: ignore[union-attr]
+        self._streaming_worker.audio_ready.connect(self._on_streaming_audio_ready)
+        self._streaming_worker.segments_ready.connect(self._on_streaming_segments_ready)
+        self._streaming_worker.chunk_completed.connect(self._on_streaming_chunk_completed)
+        self._streaming_worker.transcription_complete.connect(self._on_streaming_complete)
+        self._streaming_worker.transcription_progress.connect(self._on_streaming_progress)
+        self._streaming_worker.model_loading_progress.connect(
+            lambda msg: self._subtitle_panel.set_transcription_status(msg)
+        )
+        self._streaming_worker.error.connect(self._on_streaming_error)
+        self._streaming_worker.cancelled.connect(self._on_streaming_cancelled)
+
+        thread: QThread = self._streaming_thread
+        thread.started.connect(lambda: self._streaming_worker.run(path))  # type: ignore[union-attr]
         thread.finished.connect(thread.deleteLater)
         thread.start()
 
@@ -422,6 +441,128 @@ class MainWindow(QMainWindow):
             self._worker_thread.wait()
             self._worker_thread = None
             self._worker = None
+
+    def _cleanup_streaming_thread(self) -> None:
+        if self._streaming_thread is not None:
+            self._streaming_thread.quit()
+            self._streaming_thread.wait()
+            self._streaming_thread = None
+            self._streaming_worker = None
+
+    def _on_video_seeked(self, position_ms: int) -> None:
+        """Forward video seek position to streaming worker for priority transcription."""
+        if self._streaming_worker is not None:
+            self._streaming_worker.request_priority(position_ms / 1000.0)
+
+    def _on_streaming_audio_ready(self, total_duration: float) -> None:
+        """Audio extraction complete — update UI."""
+        self._controller.set_duration(total_duration)
+        self._split_panel.set_duration(total_duration)
+        self._status_bar_widget.set_progress(
+            0.05, f"Audio ready ({total_duration:.0f}s), loading model..."
+        )
+
+    def _on_streaming_segments_ready(self, segments: list) -> None:
+        """New segments from a completed chunk — merge into ReviewController."""
+        self._controller.merge_segments(segments)
+        n_total = len(self._controller._segments)
+        self._subtitle_panel.set_transcription_status(
+            f"Recognized {n_total} segments so far..."
+        )
+
+        # If this is the first batch, show the first segment
+        if n_total > 0 and self._controller._current_index == 0:
+            seg = self._controller.current_segment()
+            if seg:
+                self._on_segment_changed({
+                    "index": seg["index"],
+                    "total": n_total,
+                    "text": seg["text"],
+                    "start": seg["start"],
+                    "end": seg["end"],
+                    "modified": False,
+                })
+
+    def _on_streaming_chunk_completed(self, completed: int, total: int) -> None:
+        """A chunk finished — update progress."""
+        frac = 0.1 + 0.85 * (completed / total)
+        self._status_bar_widget.set_progress(
+            frac, f"Recognizing segment {completed}/{total}..."
+        )
+
+    def _on_streaming_complete(self, transcript: dict) -> None:
+        """All chunks transcribed — finalize.
+
+        Uses the in-memory segments from ReviewController (which already
+        received all chunks via merge_segments and preserves any user
+        corrections made during streaming) instead of reloading from disk.
+        """
+        n_segs = len(self._controller._segments)
+        logger.info("Streaming transcription complete: %d segments", n_segs)
+        self._status_bar_widget.hide_progress()
+        self._status_bar_widget.set_status(
+            f"Ready - {n_segs} subtitle segments loaded"
+        )
+        self._subtitle_panel.clear_transcription_status()
+        self._cleanup_streaming_thread()
+
+        # Save the in-memory transcript to disk (preserves user corrections
+        # made during streaming, unlike reloading from worker's raw output)
+        transcript_path = str(
+            Path(self._current_video_path).with_suffix(".transcript.json")
+        )
+        memory_transcript = self._controller.get_transcript()
+        try:
+            save_transcript_atomic(transcript_path, memory_transcript)
+        except Exception as exc:
+            logger.error("Failed to save transcript: %s", exc)
+            QMessageBox.warning(
+                self, "Error", f"Failed to save transcript:\n{exc}"
+            )
+            return
+
+        # Ensure transcript_path is set so future save_correction calls work
+        self._controller._transcript_path = transcript_path
+
+        # Show the first segment (or current if user was already reviewing)
+        seg = self._controller.current_segment()
+        if seg:
+            self._on_segment_changed({
+                "index": seg["index"],
+                "total": n_segs,
+                "text": seg["text"],
+                "start": seg["start"],
+                "end": seg["end"],
+                "modified": seg["index"] in self._controller._modified_indices,
+            })
+
+        # Pass transcript to split controller for chapter detection
+        self._split_controller.set_transcript(memory_transcript)
+
+    def _on_streaming_progress(self, frac: float, desc: str) -> None:
+        """Progress update from streaming worker."""
+        if frac >= 0:
+            self._status_bar_widget.set_progress(frac, desc)
+        else:
+            # Negative frac = indeterminate
+            self._status_bar_widget.set_status(desc)
+
+    def _on_streaming_error(self, msg: str) -> None:
+        """Streaming transcription error."""
+        logger.error("Streaming transcription error: %s", msg)
+        self._status_bar_widget.hide_progress()
+        self._subtitle_panel.clear_transcription_status()
+        QMessageBox.warning(self, "Transcription Error", msg)
+        self._status_bar_widget.set_status("Transcription failed - see error for details")
+        self._cleanup_streaming_thread()
+
+    def _on_streaming_cancelled(self) -> None:
+        """Streaming transcription was cancelled."""
+        logger.info("Streaming transcription cancelled")
+        self._status_bar_widget.hide_progress()
+        self._subtitle_panel.clear_transcription_status()
+        self._status_bar_widget.set_status("Transcription cancelled")
+        self._cleanup_streaming_thread()
 
     # -- Split workflow handlers -----------------------------------------------
 
@@ -635,6 +776,9 @@ class MainWindow(QMainWindow):
 
     def _on_cancel_operation(self) -> None:
         """Cancel the current background operation."""
+        if self._streaming_worker is not None:
+            self._streaming_worker.cancel()
+            self._status_bar_widget.set_status("Cancelling transcription...")
         if self._detect_worker is not None:
             self._detect_worker.cancel()
             self._status_bar_widget.set_status("Cancelling detection...")

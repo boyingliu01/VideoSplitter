@@ -183,6 +183,68 @@ def _cleanup_chunk_files(chunks: List[tuple[str, float, float]]) -> None:
             pass
 
 
+def _extract_audio_range(
+    video_path: str,
+    start_seconds: float,
+    duration_seconds: float,
+    output_path: str | None = None,
+) -> str:
+    """Extract a time range of audio from video as 16kHz mono WAV.
+
+    Uses FFmpeg with -ss before -i for fast seek (decode mode).
+
+    Args:
+        video_path: Input video/audio file path.
+        start_seconds: Start time in seconds.
+        duration_seconds: Duration to extract in seconds.
+        output_path: Optional output WAV path. Defaults to temp file.
+
+    Returns:
+        Path to the extracted WAV file.
+
+    Raises:
+        RuntimeError: If FFmpeg extraction fails.
+    """
+    if output_path is None:
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        output_path = tmp.name
+        tmp.close()
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", f"{start_seconds:.3f}",
+        "-i", video_path,
+        "-t", f"{duration_seconds:.3f}",
+        "-vn", "-acodec", "pcm_s16le",
+        "-ar", "16000", "-ac", "1",
+        output_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"FFmpeg audio range extraction failed: {result.stderr[-500:]}"
+        )
+    return output_path
+
+
+def load_funasr_model():
+    """Load FunASR AutoModel (public API for streaming worker).
+
+    Returns:
+        Loaded FunASR AutoModel instance.
+
+    Raises:
+        RuntimeError: If all model keys fail to load.
+    """
+    return _load_funasr_model()
+
+
+FUNASR_PUNC_MODEL = os.environ.get(
+    "VIDEO_SPLITTER_FUNASR_PUNC_MODEL",
+    "iic/punc_ct-transformer_cn-en-common-vocab471067-large",
+)
+
+
 def _load_funasr_model():
     """Load FunASR AutoModel with fallback model keys.
 
@@ -200,11 +262,20 @@ def _load_funasr_model():
     model_dir = os.environ.get("VIDEO_SPLITTER_FUNASR_MODEL_DIR", FUNASR_MODEL)
     candidates = [model_dir] + FUNASR_MODEL_FALLBACKS
 
+    # Punctuation model (CT-Transformer) — adds punctuation to ASR output
+    punc_model = os.environ.get("VIDEO_SPLITTER_FUNASR_PUNC_MODEL", FUNASR_PUNC_MODEL)
+    # Allow disabling punctuation model via empty env var
+    if punc_model in ("", "0", "false", "none"):
+        punc_model = None
+
     last_error = None
     for key in candidates:
         try:
             logger.info("Trying FunASR model key: %s", key)
-            model = AutoModel(model=key)
+            kwargs: dict = {"model": key}
+            if punc_model:
+                kwargs["punc_model"] = punc_model
+            model = AutoModel(**kwargs)
             return model
         except Exception as exc:
             logger.warning("Model key '%s' failed: %s", key, exc)
@@ -486,6 +557,44 @@ class FunASREngine(TranscriptionEngine):
             return False, "FunASR not installed. Install: pip install funasr"
         except Exception as e:
             return False, str(e)
+
+    def transcribe_file_chunk(
+        self,
+        model: Any,
+        video_path: str,
+        start_seconds: float,
+        duration_seconds: float,
+    ) -> List[Dict[str, Any]]:
+        """Transcribe a time range from a video file using an already-loaded model.
+
+        Extracts audio for the given range via FFmpeg, runs FunASR generate(),
+        and returns segments with timestamps offset to global timeline.
+
+        Args:
+            model: Already-loaded FunASR AutoModel instance.
+            video_path: Path to the video/audio file.
+            start_seconds: Start time of the chunk in seconds.
+            duration_seconds: Duration of the chunk in seconds.
+
+        Returns:
+            List of segment dicts with ``text``, ``start``, ``end`` (global time).
+        """
+        chunk_wav = _extract_audio_range(video_path, start_seconds, duration_seconds)
+        try:
+            result = model.generate(input=chunk_wav)
+            segments = self._extract_segments(result)
+
+            # Offset timestamps to global timeline
+            for seg in segments:
+                seg["start"] = round(seg["start"] + start_seconds, 2)
+                seg["end"] = round(seg["end"] + start_seconds, 2)
+
+            return segments
+        finally:
+            try:
+                os.unlink(chunk_wav)
+            except OSError:
+                pass
 
 
 class WhisperEngine(TranscriptionEngine):

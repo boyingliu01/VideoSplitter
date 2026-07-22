@@ -20,6 +20,7 @@ class VideoPlayerWidget(QWidget):
 
     position_changed = Signal(int)
     duration_changed = Signal(int)
+    seeked = Signal(int)  # Emitted when user drags seek slider (position in ms)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -50,6 +51,7 @@ class VideoPlayerWidget(QWidget):
         self._player.durationChanged.connect(self._on_duration_changed)
         self._player.errorOccurred.connect(self._on_error)
         self._seek_slider.sliderMoved.connect(self._player.setPosition)
+        self._seek_slider.sliderMoved.connect(self._on_slider_moved)
 
     def load_video(self, path: str) -> None:
         self._player.setSource(QUrl.fromLocalFile(path))
@@ -86,3 +88,7 @@ class VideoPlayerWidget(QWidget):
             "This video codec is not supported by the built-in player. "
             "Please pre-convert to H.264 MP4 using FFmpeg.",
         )
+
+    def _on_slider_moved(self, position: int) -> None:
+        """Emit seeked signal when user drags the seek slider."""
+        self.seeked.emit(position)

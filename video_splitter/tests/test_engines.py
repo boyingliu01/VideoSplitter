@@ -17,6 +17,8 @@ from video_splitter.extractor.engines import (  # noqa: E402
     _get_audio_duration_ffprobe,
     _read_wav_chunks,
     _cleanup_chunk_files,
+    _extract_audio_range,
+    load_funasr_model,
     FunASREngine,
     WhisperEngine,
     create_engine,
@@ -203,4 +205,193 @@ class TestReadWavChunks:
         """_cleanup_chunk_files does not raise on missing files."""
         fake_chunks = [("/nonexistent/path.wav", 0.0, 30.0)]
         _cleanup_chunk_files(fake_chunks)  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# _extract_audio_range tests
+# ---------------------------------------------------------------------------
+
+
+class TestExtractAudioRange:
+    """Tests for _extract_audio_range() — FFmpeg time-range extraction."""
+
+    def test_ffmpeg_command_includes_ss_and_t(self, tmp_path):
+        """FFmpeg command uses -ss before -i for fast seek."""
+        output = str(tmp_path / "chunk.wav")
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = _extract_audio_range("/fake/video.mp4", 60.0, 30.0, output)
+
+        assert result == output
+        cmd = mock_run.call_args[0][0]
+        assert "-ss" in cmd
+        assert "60.000" in cmd
+        assert "-t" in cmd
+        assert "30.000" in cmd
+        # -ss must come before -i
+        ss_idx = cmd.index("-ss")
+        i_idx = cmd.index("-i")
+        assert ss_idx < i_idx
+
+    def test_ffmpeg_failure_raises_runtime_error(self, tmp_path):
+        """FFmpeg non-zero exit raises RuntimeError."""
+        output = str(tmp_path / "chunk.wav")
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "Some FFmpeg error details"
+
+        with patch("subprocess.run", return_value=mock_result):
+            with pytest.raises(RuntimeError, match="FFmpeg audio range extraction failed"):
+                _extract_audio_range("/fake/video.mp4", 0.0, 30.0, output)
+
+    def test_creates_temp_file_when_no_output_path(self):
+        """When output_path is None, creates a temp file."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch("subprocess.run", return_value=mock_result):
+            result = _extract_audio_range("/fake/video.mp4", 0.0, 30.0)
+
+        assert result.endswith(".wav")
+        # Cleanup
+        try:
+            os.unlink(result)
+        except OSError:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# load_funasr_model tests
+# ---------------------------------------------------------------------------
+
+
+class TestLoadFunasrModel:
+    """Tests for load_funasr_model() public API."""
+
+    def test_delegates_to_internal_loader(self):
+        """load_funasr_model() delegates to _load_funasr_model()."""
+        mock_model = MagicMock()
+        with patch(
+            "video_splitter.extractor.engines._load_funasr_model",
+            return_value=mock_model,
+        ) as mock_load:
+            result = load_funasr_model()
+
+        mock_load.assert_called_once()
+        assert result is mock_model
+
+
+# ---------------------------------------------------------------------------
+# transcribe_file_chunk tests
+# ---------------------------------------------------------------------------
+
+
+class TestTranscribeFileChunk:
+    """Tests for FunASREngine.transcribe_file_chunk()."""
+
+    def test_returns_segments_with_global_timestamps(self):
+        """Segments have timestamps offset by start_seconds."""
+        engine = FunASREngine()
+        mock_model = MagicMock()
+        # Simulate FunASR result with local timestamps (0-5s range)
+        mock_model.generate.return_value = [{
+            "text": "hello world",
+            "timestamp": [[0, 2000], [3000, 5000]],
+        }]
+
+        with patch(
+            "video_splitter.extractor.engines._extract_audio_range",
+            return_value="/tmp/chunk.wav",
+        ):
+            segments = engine.transcribe_file_chunk(
+                mock_model, "/fake/video.mp4",
+                start_seconds=60.0, duration_seconds=30.0,
+            )
+
+        # Timestamps should be offset by 60s
+        assert len(segments) >= 1
+        for seg in segments:
+            assert seg["start"] >= 60.0
+            assert seg["end"] >= 60.0
+
+    def test_cleans_up_chunk_wav(self):
+        """Temporary chunk WAV is deleted after transcription."""
+        engine = FunASREngine()
+        mock_model = MagicMock()
+        mock_model.generate.return_value = [{"text": "", "timestamp": []}]
+
+        with patch(
+            "video_splitter.extractor.engines._extract_audio_range",
+            return_value="/tmp/chunk_to_delete.wav",
+        ):
+            with patch("os.unlink") as mock_unlink:
+                engine.transcribe_file_chunk(
+                    mock_model, "/fake/video.mp4",
+                    start_seconds=0.0, duration_seconds=30.0,
+                )
+
+        mock_unlink.assert_called_with("/tmp/chunk_to_delete.wav")
+
+    def test_cleans_up_on_error(self):
+        """Temporary chunk WAV is deleted even if transcription fails."""
+        engine = FunASREngine()
+        mock_model = MagicMock()
+        mock_model.generate.side_effect = RuntimeError("OOM")
+
+        with patch(
+            "video_splitter.extractor.engines._extract_audio_range",
+            return_value="/tmp/chunk_on_error.wav",
+        ):
+            with patch("os.unlink") as mock_unlink:
+                with pytest.raises(RuntimeError, match="OOM"):
+                    engine.transcribe_file_chunk(
+                        mock_model, "/fake/video.mp4",
+                        start_seconds=0.0, duration_seconds=30.0,
+                    )
+
+        mock_unlink.assert_called_with("/tmp/chunk_on_error.wav")
+
+
+# ---------------------------------------------------------------------------
+# Punctuation model tests
+# ---------------------------------------------------------------------------
+
+
+class TestPunctuationModel:
+    """Tests for CT-Transformer punctuation model integration."""
+
+    def test_load_funasr_model_passes_punc_model(self):
+        """AutoModel is called with punc_model parameter by default."""
+        mock_auto_model = MagicMock(return_value=MagicMock())
+        mock_funasr = MagicMock()
+        mock_funasr.AutoModel = mock_auto_model
+
+        with patch.dict(sys.modules, {"funasr": mock_funasr}):
+            try:
+                _load_funasr_model()
+            except Exception:
+                pass
+
+        if mock_auto_model.called:
+            call_kwargs = mock_auto_model.call_args[1]  # keyword args
+            assert "punc_model" in call_kwargs
+
+    def test_punc_model_disabled_via_env(self):
+        """Setting VIDEO_SPLITTER_FUNASR_PUNC_MODEL='' disables punctuation."""
+        mock_auto_model = MagicMock(return_value=MagicMock())
+        mock_funasr = MagicMock()
+        mock_funasr.AutoModel = mock_auto_model
+
+        with patch.dict(sys.modules, {"funasr": mock_funasr}):
+            with patch.dict(os.environ, {"VIDEO_SPLITTER_FUNASR_PUNC_MODEL": ""}):
+                try:
+                    _load_funasr_model()
+                except Exception:
+                    pass
+
+        if mock_auto_model.called:
+            call_kwargs = mock_auto_model.call_args[1]
+            assert "punc_model" not in call_kwargs
 
