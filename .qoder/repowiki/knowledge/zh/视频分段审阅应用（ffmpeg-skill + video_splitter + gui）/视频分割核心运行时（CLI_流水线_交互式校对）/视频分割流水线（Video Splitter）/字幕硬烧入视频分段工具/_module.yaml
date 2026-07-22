@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: ddbd7fa7-ab0d-441e-b417-43d9b0898b83/0438d74f-ea29-4b9e-a12f-2a81214b50cc/c19507ee-3062-4411-b28f-d2703ad72ad7
+title: 字幕硬烧入视频分段工具
+scope:
+    - video_splitter/splitter/subtitle_burner.py
+source_files: []
+depends_on: []
+related_to: []

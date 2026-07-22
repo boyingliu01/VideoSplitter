@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: ddbd7fa7-ab0d-441e-b417-43d9b0898b83/0438d74f-ea29-4b9e-a12f-2a81214b50cc
+title: 视频分割流水线（Video Splitter）
+scope:
+    - video_splitter/
+source_files: []
+depends_on: []
+related_to:
+    - path: 2436de64-54ec-49e0-9105-8edc48e4bb11/f595ccbb-ab52-4fd4-bcce-b73723a5c6cf
