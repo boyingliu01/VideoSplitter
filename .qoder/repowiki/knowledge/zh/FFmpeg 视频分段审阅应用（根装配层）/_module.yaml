@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: ""
-title: 视频分段审阅应用（ffmpeg-skill + video_splitter + gui）
+title: FFmpeg 视频分段审阅应用（根装配层）
 scope: []
 source_files: []
 depends_on: []

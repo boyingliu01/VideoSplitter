@@ -74,7 +74,8 @@ class TestTranscribeWorker:
         with patch("gui.workers.transcribe_worker.create_engine", return_value=mock_engine):
             worker.run("test_video.mp4")
 
-        assert worker.progress.emit.call_count == 3
+        # 2 progress emissions from audio extraction + 3 from transcription
+        assert worker.progress.emit.call_count == 5
         worker.finished.emit.assert_called_once()
         worker.error.emit.assert_not_called()
 

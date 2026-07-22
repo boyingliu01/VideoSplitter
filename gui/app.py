@@ -263,14 +263,14 @@ class MainWindow(QMainWindow):
 
         # Show wait cursor and immediate feedback
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
-        self._status_bar_widget.set_status("Loading video...")
+        self._status_bar_widget.show_progress("Loading video...")
 
         self._video_player.load_video(path)
         self._split_panel.set_video_path(path)
         self._split_controller.set_video_path(path)
 
-        self._status_bar_widget.set_status("Starting transcription...")
         QApplication.restoreOverrideCursor()
+        self._status_bar_widget.set_progress(0.0, "Preparing transcription...")
 
         self._worker = TranscribeWorker("funasr", parent=None)
         self._worker_thread = QThread(self)
@@ -359,11 +359,12 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "Error", msg)
 
     def _on_transcribe_progress(self, frac: float, desc: str) -> None:
-        self._status_bar_widget.set_status(f"Transcribing: {desc} ({frac:.0%})")
+        self._status_bar_widget.set_progress(frac, desc)
 
     def _on_transcribe_finished(self, transcript: dict) -> None:
         n_segs = len(transcript.get("segments", []))
         logger.info("Transcription complete: %d segments", n_segs)
+        self._status_bar_widget.hide_progress()
         self._status_bar_widget.set_status(f"Transcription complete ({n_segs} segments)")
         self._cleanup_thread()
 
@@ -410,6 +411,7 @@ class MainWindow(QMainWindow):
 
     def _on_transcribe_error(self, msg: str) -> None:
         logger.error("Transcription error: %s", msg)
+        self._status_bar_widget.hide_progress()
         QMessageBox.warning(self, "Transcription Error", msg)
         self._status_bar_widget.set_status("Transcription failed")
         self._cleanup_thread()

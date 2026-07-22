@@ -14,10 +14,10 @@
 
 ## 更新摘要
 **变更内容**   
-- 增强了FunASR引擎的调试日志功能，在_extract_segments函数中添加了详细的诊断日志记录
-- 新增了对FunASR结果对象实际键值的捕获和记录，用于解决长视频转录时零分段提取的问题
-- 提供了更完善的错误诊断信息，帮助开发者识别数据解析逻辑、API响应格式变化或配置问题导致的静默失败
-- 优化了分段提取过程中的日志输出，便于问题定位和调试
+- 修复了FunASR 1.3.x Paraformer模型的段提取兼容性，实现了双格式支持（sentence_info和text+timestamp）
+- 增强了_extract_segments方法的健壮性，改进了字幕生成的可靠性
+- 优化了不同FunASR版本间的API差异处理，提升了系统稳定性
+- 完善了错误处理和降级机制，确保在各种环境下的稳定运行
 
 ## 目录
 1. [简介](#简介)
@@ -34,7 +34,7 @@
 ## 简介
 本技术文档围绕将语音识别引擎从 faster-whisper 迁移到 FunASR 的集成方案，系统阐述整体架构、模型加载与配置、与 faster-whisper 的差异对比、FunASR 特性说明、迁移步骤与参数映射、性能基准与优化建议，以及完整集成示例和故障排查方法。目标是帮助开发者快速理解并落地 FunASR 在视频切分流水线中的集成方式。
 
-**更新** 本次更新重点增强了FunASR引擎的调试日志功能，特别是在_extract_segments函数中添加了详细的诊断日志记录，有效解决了长视频转录时零分段提取的问题，提升了问题诊断能力。
+**更新** 本次更新重点修复了FunASR 1.3.x Paraformer模型的段提取兼容性问题，实现了双格式支持（sentence_info和text+timestamp），显著提升了字幕生成的可靠性和系统稳定性。
 
 ## 项目结构
 本项目采用"可插拔引擎"的设计，将 ASR 引擎抽象为统一接口，默认使用 FunASR，同时保留 Whisper 引擎作为兼容选项。关键路径如下：
@@ -86,12 +86,12 @@ TRANS -.兼容/旧路径.-> WHISPER
 ## 核心组件
 - SplitConfig：集中管理模型、设备、语言、分段策略、LLM 调用等配置，支持环境变量覆盖；默认启用 transcription_engine="funasr"
 - TranscriptionEngine：定义统一的 transcribe 与 health_check 接口
-- FunASREngine：基于 FunASR AutoModel 的中文识别实现，支持离线模型目录与环境变量切换，**已增强调试日志功能和版本兼容性处理**
+- FunASREngine：基于 FunASR AutoModel 的中文识别实现，支持离线模型目录与环境变量切换，**已增强段提取兼容性和双格式支持**
 - WhisperEngine：对旧实现的封装，保持向后兼容
 - Pipeline：串联音频提取、转写、SRT 生成、章节检测、校验与切割
 - CLI：提供 split、transcribe、check 等命令，便于端到端验证与测试
 
-**更新** FunASREngine现在增强了调试日志功能，特别是在_extract_segments函数中添加了详细的诊断日志记录，能够有效捕获FunASR结果对象的实际键值，帮助识别数据解析问题和静默失败原因。
+**更新** FunASREngine现在实现了增强的段提取兼容性，支持FunASR 1.3.x版本的Paraformer模型，能够自动识别和处理两种不同的结果格式（sentence_info和text+timestamp），显著提升了字幕生成的可靠性。
 
 章节来源
 - [配置管理:1-54](file://video_splitter/config.py#L1-L54)
@@ -167,26 +167,28 @@ Factory --> TranscriptionEngine : "根据name创建"
 ### FunASR 引擎实现要点
 - 模型加载：通过环境变量 VIDEO_SPLITTER_FUNASR_MODEL_DIR 指定本地或远程模型路径，未设置则使用内置默认值
 - **版本兼容性**：**已改进** 现在使用正确的注册类名'Paraformer'，支持不同FunASR版本的API差异
-- **增强的调试日志**：**新增** 在_extract_segments函数中添加了详细的诊断日志记录，能够捕获FunASR结果对象的实际键值和数据结构
+- **增强的段提取兼容性**：**新增** 实现了双格式支持，能够自动识别和处理sentence_info和text+timestamp两种结果格式
 - 进度回调：按阶段上报（加载模型、转写中、处理结果、完成），便于 UI 反馈
 - 时间戳转换：FunASR 返回毫秒级 start/end，统一转换为秒并保留两位小数
 - 时长计算：优先取最后一段结束时间；若无有效段落，回退至 ffprobe 获取音频时长
 - 健康检查：尝试导入 funasr 与 numpy，并运行一次 generate 以验证可用
 
-**更新** 增强了_extract_segments函数的调试日志功能，现在能够详细记录FunASR结果对象的键值信息，有效解决长视频转录时零分段提取的问题，并提供更好的问题诊断能力。
+**更新** 增强了_extract_segments方法的段提取兼容性，现在能够自动识别FunASR 1.3.x版本的Paraformer模型返回的不同数据结构格式，提供了更健壮的降级机制和错误处理。
 
 ```mermaid
 flowchart TD
 Start(["开始"]) --> CheckVersion["检查FunASR版本"]
 CheckVersion --> LoadModel["加载模型(AutoModel)"]
 LoadModel --> Generate["model.generate(input=WAV)"]
-Generate --> Parse{"是否包含sentence_info?"}
-Parse --> |是| LogResult["记录FunASR结果对象键值<br/>用于调试诊断"]
-LogResult --> BuildSegs["遍历sentence_info构建segments<br/>start/end(ms→s)"]
-Parse --> |否| FallbackDur["ffprobe获取音频时长"]
+Generate --> Parse{"检测结果格式"}
+Parse --> |sentence_info| LogFormat["记录sentence_info格式<br/>构建segments列表"]
+Parse --> |text+timestamp| LogAlt["记录text+timestamp格式<br/>转换时间戳信息"]
+LogFormat --> BuildSegs["遍历sentence_info构建segments<br/>start/end(ms→s)"]
+LogAlt --> ConvertTS["转换text+timestamp格式<br/>生成标准segments"]
 BuildSegs --> LastEnd{"是否有segments?"}
+ConvertTS --> LastEnd
 LastEnd --> |是| UseLast["duration=最后段end(s)"]
-LastEnd --> |否| FallbackDur
+LastEnd --> |否| FallbackDur["ffprobe获取音频时长"]
 FallbackDur --> Done(["返回{language='zh', duration, segments}"])
 UseLast --> Done
 ```
@@ -197,29 +199,34 @@ UseLast --> Done
 章节来源
 - [可插拔引擎与FunASR实现:85-173](file://video_splitter/extractor/engines.py#L85-L173)
 
-### 增强的调试日志功能
-**新增** 在_extract_segments函数中增强了详细的诊断日志记录功能：
+### 增强的段提取兼容性
+**新增** 在_extract_segments方法中实现了增强的段提取兼容性功能：
 
-- **结果对象键值捕获**：记录FunASR返回结果对象的实际键值，帮助识别数据结构变化
-- **分段提取过程监控**：详细记录分段提取过程中的每个步骤和状态
-- **空结果诊断**：当遇到零分段提取问题时，提供详细的上下文信息和可能的原因分析
-- **API响应格式验证**：验证FunASR API响应格式是否符合预期，及时发现格式不匹配问题
-- **配置问题检测**：识别可能导致静默失败的配置问题
+- **双格式支持**：自动识别和处理sentence_info和text+timestamp两种不同的FunASR结果格式
+- **版本自适应**：根据FunASR版本动态调整解析逻辑，确保1.3.x版本的兼容性
+- **智能降级机制**：当主要格式不可用时，自动切换到备用格式解析
+- **格式验证**：在解析前验证结果对象的结构完整性，避免运行时错误
+- **错误恢复**：提供详细的错误信息和恢复策略，提升系统鲁棒性
 
 ```mermaid
 sequenceDiagram
 participant Engine as "FunASREngine"
 participant Extractor as "_extract_segments"
-participant Logger as "日志系统"
 participant Result as "FunASR结果"
+participant Parser as "格式解析器"
 Engine->>Extractor : 调用_extract_segments(result)
-Extractor->>Logger : 记录输入结果对象类型
 Extractor->>Result : 检查结果对象结构
-Result-->>Extractor : 返回实际键值信息
-Extractor->>Logger : 记录所有可用的键值
-Extractor->>Logger : 记录sentence_info状态
-Extractor->>Logger : 记录分段构建过程
-Extractor-->>Engine : 返回segments列表
+Result-->>Extractor : 返回实际数据结构
+Extractor->>Parser : 检测支持的格式类型
+Parser->>Parser : 判断sentence_info或text+timestamp
+alt sentence_info格式
+Parser->>Extractor : 返回sentence_info解析结果
+Extractor->>Extractor : 构建标准segments列表
+else text+timestamp格式
+Parser->>Extractor : 返回text+timestamp解析结果
+Extractor->>Extractor : 转换时间戳为标准格式
+end
+Extractor-->>Engine : 返回统一的segments列表
 ```
 
 **章节来源**
@@ -297,6 +304,7 @@ REQ --> PYSIDE6["PySide6"]
 - 精度表现
   - 中文标点与断句由模型自带标点模型支持，段落粒度更贴近句子边界
   - 与 faster-whisper 相比，时间戳精度存在差异，但下游章节检测具备容错性
+- **兼容性优化**：**新增** 增强的段提取兼容性减少了因格式不匹配导致的性能损失，提升了整体处理效率
 
 ## 故障排查指南
 - 常见问题
@@ -305,26 +313,26 @@ REQ --> PYSIDE6["PySide6"]
   - 设备不可用：当 device="cuda" 但无可用 GPU 时，回退到 CPU；也可显式设置为 "cpu"
   - 空结果或时长异常：当 sentence_info 为空时，会自动回退到 ffprobe 获取时长；确认 ffmpeg/ffprobe 可用
   - **版本兼容性问题**：**已改进** 如果遇到类名错误或API不匹配，检查FunASR版本并确保使用正确的Paraformer类名
-  - **分段提取问题**：**新增** 长视频转录时出现零分段提取问题，查看_extract_segments函数的详细诊断日志，检查FunASR结果对象的实际键值结构
-  - **API响应格式变化**：**新增** 如果FunASR API响应格式发生变化，诊断日志会记录实际的键值信息，帮助快速适配新的数据结构
+  - **段提取格式问题**：**新增** 如果遇到段提取失败，检查FunASR版本是否支持双格式解析，查看日志中的格式检测结果
+  - **字幕生成异常**：**新增** 字幕生成问题通常与段提取格式相关，确认_extract_segments方法正确识别了结果格式
 - 诊断命令
   - 使用 cli.check 验证依赖与基础能力
   - 使用 cli.transcribe 单独转写，观察日志与输出文件
-  - **新增** 开启详细日志级别，重点关注_extract_segments函数的诊断输出
+  - **新增** 开启详细日志级别，重点关注_extract_segments函数的格式检测和解析过程
 - 定位技巧
   - 开启日志级别 INFO，关注各阶段耗时与错误信息
   - 使用 dry_run 估算成本与 token 数，辅助定位问题范围
-  - **新增** 当遇到分段提取问题时，仔细分析_extract_segments函数输出的诊断日志，特别关注FunASR结果对象的键值信息
-  - **新增** 对于静默失败的情况，检查日志中记录的FunASR结果对象结构和实际键值，识别数据解析逻辑问题
+  - **新增** 当遇到段提取问题时，仔细分析_extract_segments函数输出的格式检测结果，确认是否正确识别了FunASR结果格式
+  - **新增** 对于字幕生成问题，检查日志中的格式转换过程和segments构建细节
 
-**更新** 新增了增强的调试日志功能相关的故障排查指导，包括_extract_segments函数的诊断日志分析和FunASR结果对象键值检查。
+**更新** 新增了增强的段提取兼容性相关的故障排查指导，包括双格式支持的问题诊断和字幕生成异常的解决方法。
 
 章节来源
 - [命令行入口:85-152](file://video_splitter/cli.py#L85-L152)
 - [可插拔引擎与FunASR实现:154-173](file://video_splitter/extractor/engines.py#L154-L173)
 
 ## 结论
-通过将 ASR 引擎抽象为可插拔接口，本项目实现了以 FunASR 为默认引擎的平滑迁移。FunASR 在中文场景下的速度与精度优势明显，且通过环境变量与工厂模式提供了灵活的部署与切换能力。**本次更新进一步增强了FunASR引擎的调试日志功能，特别是在_extract_segments函数中添加了详细的诊断日志记录，有效解决了长视频转录时零分段提取的问题，显著提升了问题诊断能力和用户体验**。配合稳定的数据契约与完善的错误处理，迁移过程对上层流程影响最小化，具备良好的可维护性与可扩展性。
+通过将 ASR 引擎抽象为可插拔接口，本项目实现了以 FunASR 为默认引擎的平滑迁移。FunASR 在中文场景下的速度与精度优势明显，且通过环境变量与工厂模式提供了灵活的部署与切换能力。**本次更新进一步增强了FunASR引擎的段提取兼容性，实现了双格式支持（sentence_info和text+timestamp），显著提升了字幕生成的可靠性和系统稳定性**。配合稳定的数据契约与完善的错误处理，迁移过程对上层流程影响最小化，具备良好的可维护性与可扩展性。
 
 ## 附录：迁移与使用示例
 
@@ -345,7 +353,7 @@ REQ --> PYSIDE6["PySide6"]
 - 更新 CLI 的 --model 选择集（如需）
 - 完善健康检查与错误提示
 - **版本兼容性**：**已改进** 确保使用正确的Paraformer类名，支持不同FunASR版本
-- **调试日志增强**：**新增** 在_extract_segments函数中添加详细的诊断日志记录，提升问题诊断能力
+- **段提取兼容性**：**新增** 实现双格式支持，自动识别和处理sentence_info和text+timestamp格式
 
 章节来源
 - [配置管理:36-53](file://video_splitter/config.py#L36-L53)
@@ -373,7 +381,7 @@ REQ --> PYSIDE6["PySide6"]
   - FunASR 首次运行下载模型体积较大，建议预置本地模型
 - 精度表现
   - 中文标点与断句质量较好；时间戳可能与 Whisper 有差异，但下游具备容错
-- **调试能力**：**新增** FunASR引擎提供了更详细的调试日志，特别是在分段提取过程中，有助于快速定位和解决问题
+- **兼容性增强**：**新增** FunASR引擎提供了增强的段提取兼容性，支持多种结果格式，提升了系统稳定性
 
 章节来源
 - [迁移设计文档:387-397](file://docs/funasr-migration-design.md#L387-397)
@@ -402,7 +410,7 @@ REQ --> PYSIDE6["PySide6"]
   - 进度回调的阶段调用
   - 健康检查的依赖缺失与成功路径
   - **版本兼容性**：**已改进** 不同FunASR版本的类名解析和API兼容性测试
-  - **调试日志功能**：**新增** _extract_segments函数的诊断日志记录和FunASR结果对象键值捕获测试
+  - **段提取兼容性**：**新增** 双格式支持测试，包括sentence_info和text+timestamp格式的解析验证
 
 章节来源
 - [单元测试（FunASR）:49-162](file://tests/test_transcribe_funasr.py#L49-L162)
