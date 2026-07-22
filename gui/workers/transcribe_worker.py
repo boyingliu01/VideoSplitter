@@ -35,20 +35,23 @@ class TranscribeWorker(QObject):
     @Slot(str)
     def run(self, video_path: str) -> None:
         try:
-            # Phase 1: Extract audio from video → WAV (0-10%)
-            self.progress.emit(0.0, "Extracting audio from video...")
+            # Phase 1: Extract audio from video → WAV (0-8%)
+            self.progress.emit(0.0, "Step 1/3: Extracting audio from video...")
             extractor = AudioExtractor()
             audio_path = extractor.extract(video_path)
-            self.progress.emit(0.10, "Audio extraction complete")
+            self.progress.emit(0.08, "Audio extraction complete")
 
-            # Phase 2: Transcribe the extracted WAV (10-100%)
+            # Phase 2: Load ASR engine + model (8-18%)
+            self.progress.emit(0.08, "Step 2/3: Loading speech recognition model...")
             engine = create_engine(self._engine_name, self._config)
 
             def _on_progress(frac: float, desc: str) -> None:
-                # Map engine progress (0-1) to overall progress (0.1-1.0)
-                overall = 0.1 + frac * 0.9
+                # Map engine progress (0-1) to overall progress (0.18-1.0)
+                overall = 0.18 + frac * 0.82
                 self.progress.emit(overall, desc)
 
+            # Phase 3: Transcribe (18-100%)
+            self.progress.emit(0.18, "Step 3/3: Transcribing audio to text...")
             transcript = engine.transcribe(
                 audio_path,
                 self._config,

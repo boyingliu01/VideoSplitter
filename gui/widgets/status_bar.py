@@ -11,16 +11,18 @@ class StatusBarWidget(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._label = QLabel("Ready", self)
+        self._label.setStyleSheet("font-size: 13px; font-weight: bold; padding: 2px;")
+
         self._progress_bar = QProgressBar(self)
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
         self._progress_bar.setTextVisible(True)
-        self._progress_bar.setFixedHeight(16)
+        self._progress_bar.setFixedHeight(22)
         self._progress_bar.hide()  # Hidden by default
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(2)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
         layout.addWidget(self._label)
         layout.addWidget(self._progress_bar)
 
@@ -29,12 +31,13 @@ class StatusBarWidget(QWidget):
         self._label.setText(text)
 
     def set_progress(self, fraction: float, description: str = "") -> None:
-        """Set progress with percentage and optional description."""
+        """Set progress with percentage and description."""
         pct = int(fraction * 100)
         self._progress_bar.setValue(pct)
+        self._progress_bar.setFormat(f"{pct}%")
         self._progress_bar.show()
         if description:
-            self._label.setText(f"{description} ({pct}%)")
+            self._label.setText(f"{description}  [{pct}%]")
         else:
             self._label.setText(f"{pct}%")
 
