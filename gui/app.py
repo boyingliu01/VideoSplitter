@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QUrl, QObject, Signal, Slot
-from PySide6.QtGui import QAction, QCursor, QDesktopServices, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -29,22 +30,31 @@ from gui.workers.split_worker import SplitWorker
 from gui.workers.transcribe_worker import TranscribeWorker
 from gui.workers.streaming_transcribe_worker import StreamingTranscribeWorker
 from gui.workers.model_loader_worker import ModelLoaderWorker
-from video_splitter.extractor.engines import FunASREngine
 from video_splitter.review import save_transcript_atomic
 
 logger = logging.getLogger(__name__)
 
 
 class _HealthCheckWorker(QObject):
-    """Run FunASR health check in a background thread."""
+    """Run FunASR health check in a background thread.
+
+    Uses load_funasr_model(use_cache=True) so the loaded model is cached
+    for later use by ModelLoaderWorker / StreamingTranscribeWorker.
+    This avoids loading the model twice at startup.
+    """
 
     finished = Signal(bool, str)
 
     @Slot()
     def run(self) -> None:
         try:
-            ok, msg = FunASREngine().health_check()
-            self.finished.emit(ok, msg)
+            from video_splitter.extractor.engines import load_funasr_model
+            model = load_funasr_model(use_cache=True)
+            # Quick sanity check with dummy audio
+            import numpy as np
+            dummy_wav = np.zeros(16000, dtype=np.float32)
+            model.generate(input=dummy_wav)
+            self.finished.emit(True, "ok")
         except Exception as exc:
             self.finished.emit(False, str(exc))
 
@@ -129,6 +139,12 @@ class MainWindow(QMainWindow):
         open_hotword_action = QAction("Open Hot&word Document...", self)
         open_hotword_action.triggered.connect(self._on_open_hotword)
         file_menu.addAction(open_hotword_action)
+
+        file_menu.addSeparator()
+
+        transcribe_action = QAction("Start &Speech Recognition", self)
+        transcribe_action.triggered.connect(self._on_start_transcription)
+        file_menu.addAction(transcribe_action)
 
         file_menu.addSeparator()
 
@@ -286,20 +302,36 @@ class MainWindow(QMainWindow):
             return
         self._current_video_path = path
 
-        # Show wait cursor and immediate feedback
-        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
-        self._status_bar_widget.show_progress("Loading video file...")
-
         self._video_player.load_video(path)
+
         self._split_panel.set_video_path(path)
         self._split_controller.set_video_path(path)
 
-        QApplication.restoreOverrideCursor()
-        self._status_bar_widget.set_progress(0.0, "Loading speech recognition model...")
+        self._status_bar_widget.set_status(f"Video loaded: {os.path.basename(path)}")
+        self._subtitle_panel.set_transcription_status(
+            "Click File → Start Speech Recognition to begin transcription."
+        )
+
+    def _on_start_transcription(self) -> None:
+        """Start streaming speech recognition for the current video."""
+        if not self._current_video_path:
+            QMessageBox.warning(
+                self, "No Video",
+                "Please open a video file first.",
+            )
+            return
+
+        if self._streaming_worker is not None:
+            QMessageBox.information(
+                self, "Already Running",
+                "Speech recognition is already in progress.",
+            )
+            return
+
+        self._status_bar_widget.show_progress("Loading speech recognition model...")
         self._subtitle_panel.set_transcription_status("Initializing speech recognition...")
 
-        # Phase 1: Pre-load model in a dedicated thread (prevents UI freeze)
-        self._pending_video_path = path
+        self._pending_video_path = self._current_video_path
         self._start_model_loader()
 
     def _start_model_loader(self) -> None:
