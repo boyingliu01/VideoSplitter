@@ -603,11 +603,8 @@ class MainWindow(QMainWindow):
         """New segments from a completed chunk — merge into ReviewController."""
         self._controller.merge_segments(segments)
         n_total = len(self._controller._segments)
-        self._subtitle_panel.set_transcription_status(
-            f"Recognized {n_total} segments so far..."
-        )
 
-        # If this is the first batch, show the first segment
+        # Always show the first segment for review (once)
         if n_total > 0 and self._controller._current_index == 0:
             seg = self._controller.current_segment()
             if seg:
@@ -619,6 +616,16 @@ class MainWindow(QMainWindow):
                     "end": seg["end"],
                     "modified": False,
                 })
+
+        # Always update the status with the latest recognized text
+        # so the user can see progress during streaming
+        if segments:
+            latest_text = segments[-1].get("text", "")
+            start = segments[-1].get("start", 0)
+            m, s = divmod(int(start), 60)
+            self._subtitle_panel.set_transcription_status(
+                f"[{m:02d}:{s:02d}] {latest_text}"
+            )
 
     def _on_streaming_chunk_completed(self, completed: int, total: int) -> None:
         """A chunk finished — update progress."""
