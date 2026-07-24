@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QUrl, QObject, Signal, Slot
-from PySide6.QtGui import QAction, QCursor, QDesktopServices, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -29,22 +30,31 @@ from gui.workers.split_worker import SplitWorker
 from gui.workers.transcribe_worker import TranscribeWorker
 from gui.workers.streaming_transcribe_worker import StreamingTranscribeWorker
 from gui.workers.model_loader_worker import ModelLoaderWorker
-from video_splitter.extractor.engines import FunASREngine
 from video_splitter.review import save_transcript_atomic
 
 logger = logging.getLogger(__name__)
 
 
 class _HealthCheckWorker(QObject):
-    """Run FunASR health check in a background thread."""
+    """Run FunASR health check in a background thread.
+
+    Uses load_funasr_model(use_cache=True) so the loaded model is cached
+    for later use by ModelLoaderWorker / StreamingTranscribeWorker.
+    This avoids loading the model twice at startup.
+    """
 
     finished = Signal(bool, str)
 
     @Slot()
     def run(self) -> None:
         try:
-            ok, msg = FunASREngine().health_check()
-            self.finished.emit(ok, msg)
+            from video_splitter.extractor.engines import load_funasr_model
+            model = load_funasr_model(use_cache=True)
+            # Quick sanity check with dummy audio
+            import numpy as np
+            dummy_wav = np.zeros(16000, dtype=np.float32)
+            model.generate(input=dummy_wav)
+            self.finished.emit(True, "ok")
         except Exception as exc:
             self.finished.emit(False, str(exc))
 
@@ -94,6 +104,10 @@ class MainWindow(QMainWindow):
         # Track split output for subtitle burning
         self._split_output_files: list[str] = []
 
+        # Hotword string for ASR enhancement (loaded from document)
+        self._hotword: str = ""
+        self._hotword_file_path: str = ""
+
         self._build_menu()
         self._build_central()
         self._build_status()
@@ -119,6 +133,18 @@ class MainWindow(QMainWindow):
         export_chapters_action = QAction("Export &Chapters...", self)
         export_chapters_action.triggered.connect(self._on_export_chapters)
         file_menu.addAction(export_chapters_action)
+
+        file_menu.addSeparator()
+
+        open_hotword_action = QAction("Open Hot&word Document...", self)
+        open_hotword_action.triggered.connect(self._on_open_hotword)
+        file_menu.addAction(open_hotword_action)
+
+        file_menu.addSeparator()
+
+        transcribe_action = QAction("Start &Speech Recognition", self)
+        transcribe_action.triggered.connect(self._on_start_transcription)
+        file_menu.addAction(transcribe_action)
 
         file_menu.addSeparator()
 
@@ -276,20 +302,36 @@ class MainWindow(QMainWindow):
             return
         self._current_video_path = path
 
-        # Show wait cursor and immediate feedback
-        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
-        self._status_bar_widget.show_progress("Loading video file...")
-
         self._video_player.load_video(path)
+
         self._split_panel.set_video_path(path)
         self._split_controller.set_video_path(path)
 
-        QApplication.restoreOverrideCursor()
-        self._status_bar_widget.set_progress(0.0, "Loading speech recognition model...")
+        self._status_bar_widget.set_status(f"Video loaded: {os.path.basename(path)}")
+        self._subtitle_panel.set_transcription_status(
+            "Click File → Start Speech Recognition to begin transcription."
+        )
+
+    def _on_start_transcription(self) -> None:
+        """Start streaming speech recognition for the current video."""
+        if not self._current_video_path:
+            QMessageBox.warning(
+                self, "No Video",
+                "Please open a video file first.",
+            )
+            return
+
+        if self._streaming_worker is not None:
+            QMessageBox.information(
+                self, "Already Running",
+                "Speech recognition is already in progress.",
+            )
+            return
+
+        self._status_bar_widget.show_progress("Loading speech recognition model...")
         self._subtitle_panel.set_transcription_status("Initializing speech recognition...")
 
-        # Phase 1: Pre-load model in a dedicated thread (prevents UI freeze)
-        self._pending_video_path = path
+        self._pending_video_path = self._current_video_path
         self._start_model_loader()
 
     def _start_model_loader(self) -> None:
@@ -328,7 +370,14 @@ class MainWindow(QMainWindow):
 
     def _start_streaming_transcription(self, path: str) -> None:
         """Start the StreamingTranscribeWorker (model already cached)."""
-        self._streaming_worker = StreamingTranscribeWorker("funasr", parent=None)
+        # Also try loading hotwords from environment if not already set via GUI
+        if not self._hotword:
+            from video_splitter.extractor.hotwords import load_hotwords_from_env
+            self._hotword = load_hotwords_from_env()
+
+        self._streaming_worker = StreamingTranscribeWorker(
+            "funasr", parent=None, hotword=self._hotword
+        )
         self._streaming_thread = QThread(self)
         self._streaming_worker.moveToThread(self._streaming_thread)
 
@@ -378,6 +427,41 @@ class MainWindow(QMainWindow):
         # Pass transcript to split controller for chapter detection
         self._split_controller.set_transcript(self._controller.get_transcript())
         self._status_bar_widget.set_status(f"Loaded transcript: {path}")
+
+    def _on_open_hotword(self) -> None:
+        """Open a hotword document to improve ASR accuracy."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Hotword Document",
+            "",
+            "Text Files (*.txt);;Word Documents (*.docx);;PDF Files (*.pdf);;All Files (*.*)",
+        )
+        if not path:
+            return
+
+        from video_splitter.extractor.hotwords import load_hotwords_from_file
+
+        try:
+            hotwords = load_hotwords_from_file(path)
+            if not hotwords:
+                QMessageBox.warning(
+                    self, "Warning",
+                    "No hotwords extracted from the document.\n"
+                    "Check the file format and content."
+                )
+                return
+
+            self._hotword = hotwords
+            self._hotword_file_path = path
+            word_count = len(hotwords.split())
+            self._status_bar_widget.set_status(
+                f"Loaded {word_count} hotwords from: {os.path.basename(path)}"
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Error",
+                f"Failed to load hotword document:\n{exc}"
+            )
 
     def _on_save_next(self) -> None:
         seg = self._controller.current_segment()
@@ -519,11 +603,8 @@ class MainWindow(QMainWindow):
         """New segments from a completed chunk — merge into ReviewController."""
         self._controller.merge_segments(segments)
         n_total = len(self._controller._segments)
-        self._subtitle_panel.set_transcription_status(
-            f"Recognized {n_total} segments so far..."
-        )
 
-        # If this is the first batch, show the first segment
+        # Always show the first segment for review (once)
         if n_total > 0 and self._controller._current_index == 0:
             seg = self._controller.current_segment()
             if seg:
@@ -535,6 +616,16 @@ class MainWindow(QMainWindow):
                     "end": seg["end"],
                     "modified": False,
                 })
+
+        # Always update the status with the latest recognized text
+        # so the user can see progress during streaming
+        if segments:
+            latest_text = segments[-1].get("text", "")
+            start = segments[-1].get("start", 0)
+            m, s = divmod(int(start), 60)
+            self._subtitle_panel.set_transcription_status(
+                f"[{m:02d}:{s:02d}] {latest_text}"
+            )
 
     def _on_streaming_chunk_completed(self, completed: int, total: int) -> None:
         """A chunk finished — update progress."""

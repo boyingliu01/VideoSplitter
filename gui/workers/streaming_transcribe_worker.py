@@ -52,11 +52,13 @@ class StreamingTranscribeWorker(QObject):
         engine_name: str = "funasr",
         config: Optional[SplitConfig] = None,
         parent: QObject | None = None,
+        hotword: str = "",
     ) -> None:
         super().__init__(parent)
         self._engine_name = engine_name
         self._config = config if config is not None else SplitConfig()
         self._chunk_seconds: int = FUNASR_CHUNK_SECONDS
+        self._hotword = hotword  # Space-separated hotword string for ASR enhancement
 
         # State (only accessed from worker thread, except priority/cancel)
         self._priority_chunk_index: int = -1  # -1 = no priority request
@@ -82,10 +84,9 @@ class StreamingTranscribeWorker(QObject):
 
     def _run_impl(self, video_path: str) -> None:
         # Phase 1: Get duration + parallel audio extraction + model loading
-        self.transcription_progress.emit(0.0, "Step 1/3: Preparing audio and model...")
+        self.transcription_progress.emit(0.0, "Step 1/3: Preparing...")
         self.model_loading_progress.emit("Getting video duration...")
 
-        # Get video duration via ffprobe
         try:
             total_duration = _get_audio_duration_ffprobe(video_path)
         except Exception as exc:
@@ -98,12 +99,10 @@ class StreamingTranscribeWorker(QObject):
 
         self.audio_ready.emit(total_duration)
 
-        # Start FFmpeg audio extraction in background (subprocess.Popen)
-        # and load FunASR model in parallel
-        self.model_loading_progress.emit("Loading speech recognition model...")
-        self.transcription_progress.emit(0.02, "Step 1/3: Loading model (parallel with audio)...")
+        # Start FFmpeg full audio extraction in background
+        self.model_loading_progress.emit("Extracting audio...")
+        self.transcription_progress.emit(0.02, "Step 1/3: Extracting audio...")
 
-        # Extract full audio to temp WAV via FFmpeg (background)
         tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         tmp_wav_path = tmp_wav.name
         tmp_wav.close()
@@ -118,13 +117,10 @@ class StreamingTranscribeWorker(QObject):
             ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
-        # While FFmpeg runs, load the model in current thread
-        # If model is already cached (pre-loaded by ModelLoaderWorker),
-        # this returns instantly.
+        # While FFmpeg extracts audio, load the model in current thread
         self.model_loading_progress.emit("Loading speech recognition model...")
         model = load_funasr_model(use_cache=True)
         if model is None:
-            # Cache miss — force load (shouldn't happen if ModelLoaderWorker ran first)
             self.model_loading_progress.emit("Model not cached, loading from disk...")
             model = load_funasr_model(use_cache=False)
         self.model_loading_progress.emit("Model loaded successfully")
@@ -143,29 +139,24 @@ class StreamingTranscribeWorker(QObject):
 
         self.transcription_progress.emit(0.10, "Step 2/3: Audio ready, starting transcription...")
 
-        # Phase 2: Compute chunk layout
+        # Phase 2: Compute chunk layout and transcribe from WAV
         n_chunks = max(1, math.ceil(total_duration / self._chunk_seconds))
         logger.info(
             "Streaming transcription: %.0fs video → %d chunks of %ds",
             total_duration, n_chunks, self._chunk_seconds,
         )
 
-        # Build chunk queue (ordered indices)
         chunk_queue: Deque[int] = deque(range(n_chunks))
-
-        # Phase 3: Transcribe chunks
         engine = FunASREngine()
         chunks_since_gc = 0
 
         try:
             while chunk_queue:
-                # Check cancellation
                 if self._cancelled:
                     logger.info("Streaming transcription cancelled")
                     self.cancelled.emit()
                     return
 
-                # Check priority request
                 if (
                     self._priority_chunk_index >= 0
                     and self._priority_chunk_index in chunk_queue
@@ -175,11 +166,10 @@ class StreamingTranscribeWorker(QObject):
                     chunk_queue.appendleft(priority_idx)
                     self._priority_chunk_index = -1
                     self.transcription_progress.emit(
-                        -1.0,  # Indeterminate
+                        -1.0,
                         f"Priority: transcribing segment at requested position...",
                     )
 
-                # Pop next chunk
                 chunk_idx = chunk_queue.popleft()
                 start_time = chunk_idx * self._chunk_seconds
                 duration = min(
@@ -187,14 +177,13 @@ class StreamingTranscribeWorker(QObject):
                     total_duration - start_time,
                 )
 
-                # Update progress
                 frac = 0.1 + 0.85 * (len(self._completed_chunks) / n_chunks)
                 self.transcription_progress.emit(
                     frac,
                     f"Step 3/3: Recognizing segment {len(self._completed_chunks) + 1}/{n_chunks}...",
                 )
 
-                # Transcribe this chunk using FFmpeg extraction + model
+                # Extract chunk from the full WAV (fast — no video seek)
                 try:
                     chunk_wav = _extract_audio_range(
                         tmp_wav_path, start_time, duration
@@ -205,15 +194,17 @@ class StreamingTranscribeWorker(QObject):
                     continue
 
                 try:
-                    result = model.generate(input=chunk_wav)
+                    generate_kwargs: dict = {"input": chunk_wav}
+                    if self._hotword:
+                        generate_kwargs["hotword"] = self._hotword
+
+                    result = model.generate(**generate_kwargs)
                     new_segments = engine._extract_segments(result)
 
-                    # Offset timestamps to global timeline
                     for seg in new_segments:
                         seg["start"] = round(seg["start"] + start_time, 2)
                         seg["end"] = round(seg["end"] + start_time, 2)
 
-                    # Deduplicate against existing segments
                     deduped = self._deduplicate_segments(new_segments)
                     self._all_segments.extend(deduped)
 
@@ -231,20 +222,18 @@ class StreamingTranscribeWorker(QObject):
                 self._completed_chunks.add(chunk_idx)
                 self.chunk_completed.emit(len(self._completed_chunks), n_chunks)
 
-                # GC every 3 chunks
                 chunks_since_gc += 1
                 if chunks_since_gc >= 3:
                     gc.collect()
                     chunks_since_gc = 0
 
         finally:
-            # Cleanup temp WAV
             try:
                 os.unlink(tmp_wav_path)
             except OSError:
                 pass
 
-        # Phase 4: Complete
+        # Phase 3: Complete
         self.transcription_progress.emit(1.0, "Transcription complete")
         transcript = {
             "language": "zh",
