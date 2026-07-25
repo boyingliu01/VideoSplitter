@@ -10,7 +10,6 @@ _PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if _PROJ_ROOT not in sys.path:
     sys.path.insert(0, _PROJ_ROOT)
 
-from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication
 
 from gui.workers.model_loader_worker import ModelLoaderWorker

@@ -15,6 +15,7 @@ if _PROJ_ROOT not in sys.path:
 from video_splitter.extractor.engines import (  # noqa: E402
     _ENGINE_REGISTRY,
     _get_audio_duration_ffprobe,
+    _load_funasr_model,
     _read_wav_chunks,
     _cleanup_chunk_files,
     _extract_audio_range,
