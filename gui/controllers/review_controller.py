@@ -111,10 +111,10 @@ class ReviewController(QObject):
 
     def export_srt(self) -> str:
         """Export segments as SRT file (atomic write via tempfile).
-        
+
         Returns:
             Path to the saved SRT file.
-        
+
         Raises:
             OSError: If the file cannot be written.
         """
