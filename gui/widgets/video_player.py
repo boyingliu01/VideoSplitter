@@ -55,6 +55,11 @@ class VideoPlayerWidget(QWidget):
 
     def load_video(self, path: str) -> None:
         self._player.setSource(QUrl.fromLocalFile(path))
+        # Play then immediately pause to force the media engine to decode
+        # and render the first frame. Without this, the video area stays
+        # black until the user manually clicks play.
+        self._player.play()
+        self._player.pause()
 
     def seek_to(self, position_ms: int) -> None:
         self._player.setPosition(position_ms)
