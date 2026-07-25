@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 
-import pytest
 
 from video_splitter.extractor.hotwords import (
     load_hotwords_from_file,

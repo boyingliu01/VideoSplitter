@@ -36,7 +36,6 @@ class ModelLoaderWorker(QObject):
         try:
             from video_splitter.extractor.engines import (
                 load_funasr_model,
-                clear_funasr_model_cache,
             )
 
             # If model is already cached (e.g. from health check), return fast

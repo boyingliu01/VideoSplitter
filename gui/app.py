@@ -193,9 +193,12 @@ class MainWindow(QMainWindow):
 
         sp.prev_requested.connect(ctrl.prev)
         sp.save_next_requested.connect(self._on_save_next)
+        sp.skip_all_requested.connect(self._on_skip_all)
         sp.jump_requested.connect(lambda n: ctrl.jump_to(n - 1))
         sp.save_requested.connect(self._on_save_current)
         sp.editing_started.connect(vp.pause)
+        sp.start_transcription_requested.connect(self._on_start_transcription)
+        sp.segment_activated.connect(self._on_segment_activated)
 
         ctrl.segment_changed.connect(self._on_segment_changed)
         ctrl.error.connect(self._on_controller_error)
@@ -292,6 +295,13 @@ class MainWindow(QMainWindow):
             self._hc_worker = None
 
     def _on_open_video(self) -> None:
+        if self._streaming_worker is not None:
+            QMessageBox.information(
+                self, "Transcription Running",
+                "Speech recognition is in progress. "
+                "Please wait for it to finish before opening another video.",
+            )
+            return
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Open Video",
@@ -307,9 +317,11 @@ class MainWindow(QMainWindow):
         self._split_panel.set_video_path(path)
         self._split_controller.set_video_path(path)
 
+        self._subtitle_panel.clear_recognized_segments()
+        self._subtitle_panel.set_transcribing(False)
         self._status_bar_widget.set_status(f"Video loaded: {os.path.basename(path)}")
         self._subtitle_panel.set_transcription_status(
-            "Click File → Start Speech Recognition to begin transcription."
+            "Click 'Start Speech Recognition' to begin transcription."
         )
 
     def _on_start_transcription(self) -> None:
@@ -330,6 +342,8 @@ class MainWindow(QMainWindow):
 
         self._status_bar_widget.show_progress("Loading speech recognition model...")
         self._subtitle_panel.set_transcription_status("Initializing speech recognition...")
+        self._subtitle_panel.set_transcribing(True)
+        self._subtitle_panel.clear_recognized_segments()
 
         self._pending_video_path = self._current_video_path
         self._start_model_loader()
@@ -484,6 +498,29 @@ class MainWindow(QMainWindow):
         if result is None:
             self._status_bar_widget.set_status("Review complete — all segments reviewed")
 
+    def _on_skip_all(self) -> None:
+        """Skip reviewing everything — jump straight to the last segment."""
+        n = len(self._controller._segments)
+        if n == 0:
+            self._status_bar_widget.set_status("No segments yet")
+            return
+        if self._controller.jump_to(n - 1) is not None:
+            self._status_bar_widget.set_status(
+                f"Skipped to last segment ({n}/{n})"
+            )
+
+    def _on_segment_activated(self, start_seconds: float) -> None:
+        """Recognized-subtitle row clicked: jump review there + seek video."""
+        segments = self._controller._segments
+        if not segments:
+            return
+        best_idx = min(
+            range(len(segments)),
+            key=lambda i: abs(segments[i]["start"] - start_seconds),
+        )
+        self._controller.jump_to(best_idx)
+        self._video_player.seek_to(int(start_seconds * 1000))
+
     def _on_position_changed(self, position_ms: int) -> None:
         secs = position_ms / 1000.0
         t = f"{int(secs // 60):02d}:{int(secs % 60):02d}"
@@ -617,15 +654,8 @@ class MainWindow(QMainWindow):
                     "modified": False,
                 })
 
-        # Always update the status with the latest recognized text
-        # so the user can see progress during streaming
-        if segments:
-            latest_text = segments[-1].get("text", "")
-            start = segments[-1].get("start", 0)
-            m, s = divmod(int(start), 60)
-            self._subtitle_panel.set_transcription_status(
-                f"[{m:02d}:{s:02d}] {latest_text}"
-            )
+        # Append to the scrolling recognized-segments list (click-to-jump)
+        self._subtitle_panel.append_recognized_segments(segments)
 
     def _on_streaming_chunk_completed(self, completed: int, total: int) -> None:
         """A chunk finished — update progress."""
@@ -648,6 +678,7 @@ class MainWindow(QMainWindow):
             f"Ready - {n_segs} subtitle segments loaded"
         )
         self._subtitle_panel.clear_transcription_status()
+        self._subtitle_panel.set_transcribing(False)
         self._cleanup_streaming_thread()
 
         # Save the in-memory transcript to disk (preserves user corrections
@@ -696,6 +727,7 @@ class MainWindow(QMainWindow):
         logger.error("Streaming transcription error: %s", msg)
         self._status_bar_widget.hide_progress()
         self._subtitle_panel.clear_transcription_status()
+        self._subtitle_panel.set_transcribing(False)
         QMessageBox.warning(self, "Transcription Error", msg)
         self._status_bar_widget.set_status("Transcription failed - see error for details")
         self._cleanup_streaming_thread()
@@ -705,6 +737,7 @@ class MainWindow(QMainWindow):
         logger.info("Streaming transcription cancelled")
         self._status_bar_widget.hide_progress()
         self._subtitle_panel.clear_transcription_status()
+        self._subtitle_panel.set_transcribing(False)
         self._status_bar_widget.set_status("Transcription cancelled")
         self._cleanup_streaming_thread()
 
