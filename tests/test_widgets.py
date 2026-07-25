@@ -171,3 +171,78 @@ class TestStatusBarWidget:
         bar = StatusBarWidget()
         bar.set_progress(0.75)
         assert "75%" in bar._label.text()
+
+
+class TestSubtitlePanelStreamingUI:
+    """Tests for SubtitlePanel streaming-transcription UI additions:
+    start button, recognized-segments scrolling list, click-to-jump."""
+
+    def test_transcribe_button_emits_start_signal(self, qapp):
+        from unittest.mock import MagicMock
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        spy = MagicMock()
+        panel.start_transcription_requested.connect(spy)
+        panel._transcribe_btn.click()
+        spy.assert_called_once_with()
+
+    def test_set_transcribing_toggles_button_state(self, qapp):
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.set_transcribing(True)
+        assert not panel._transcribe_btn.isEnabled()
+        assert panel._transcribe_btn.text() == "识别中…"
+        panel.set_transcribing(False)
+        assert panel._transcribe_btn.isEnabled()
+        assert panel._transcribe_btn.text() == "开始语音识别"
+
+    def test_segment_list_initially_hidden(self, qapp):
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        assert panel._segment_list.isHidden()
+
+    def test_append_recognized_segments_populates_list(self, qapp):
+        from PySide6.QtCore import Qt
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.append_recognized_segments([
+            {"text": "第一句", "start": 65.0, "end": 70.0},
+            {"text": "第二句", "start": 130.5, "end": 135.0},
+        ])
+        assert not panel._segment_list.isHidden()
+        assert panel._segment_list.count() == 2
+        item0 = panel._segment_list.item(0)
+        assert item0.text() == "[01:05] 第一句"
+        assert item0.data(Qt.ItemDataRole.UserRole) == 65.0
+        item1 = panel._segment_list.item(1)
+        assert item1.text() == "[02:10] 第二句"
+        assert item1.data(Qt.ItemDataRole.UserRole) == 130.5
+
+    def test_append_empty_segments_keeps_list_hidden(self, qapp):
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.append_recognized_segments([])
+        assert panel._segment_list.isHidden()
+        assert panel._segment_list.count() == 0
+
+    def test_clear_recognized_segments(self, qapp):
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.append_recognized_segments([
+            {"text": "x", "start": 1.0, "end": 2.0},
+        ])
+        panel.clear_recognized_segments()
+        assert panel._segment_list.count() == 0
+        assert panel._segment_list.isHidden()
+
+    def test_segment_item_click_emits_segment_activated(self, qapp):
+        from unittest.mock import MagicMock
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.append_recognized_segments([
+            {"text": "第一句", "start": 65.0, "end": 70.0},
+        ])
+        spy = MagicMock()
+        panel.segment_activated.connect(spy)
+        panel._on_segment_item_clicked(panel._segment_list.item(0))
+        spy.assert_called_once_with(65.0)

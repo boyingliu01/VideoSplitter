@@ -38,8 +38,8 @@ class TestMainWindowOpenVideoFlow:
     """Test the main user flow: open video → model loading → transcription."""
 
     @patch("gui.app.MainWindow._start_health_check")
-    def test_open_video_starts_model_loader(self, mock_hc, qapp, mock_video):
-        """Opening a video should start the ModelLoaderWorker."""
+    def test_open_video_does_not_start_model_loader(self, mock_hc, qapp, mock_video):
+        """Opening a video should NOT start the ModelLoaderWorker (decoupled)."""
         from gui.app import MainWindow
 
         win = MainWindow()
@@ -49,7 +49,19 @@ class TestMainWindowOpenVideoFlow:
             with patch.object(win._video_player, "load_video"):
                 with patch.object(win, "_start_model_loader") as mock_start:
                     win._on_open_video()
-                    mock_start.assert_called_once()
+                    mock_start.assert_not_called()
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_start_transcription_starts_model_loader(self, mock_hc, qapp, mock_video):
+        """Manually triggering transcription should start the ModelLoaderWorker."""
+        from gui.app import MainWindow
+
+        win = MainWindow()
+        win._current_video_path = mock_video
+
+        with patch.object(win, "_start_model_loader") as mock_start:
+            win._on_start_transcription()
+            mock_start.assert_called_once()
 
     @patch("gui.app.MainWindow._start_health_check")
     def test_model_loader_finished_starts_streaming(self, mock_hc, qapp, mock_video):

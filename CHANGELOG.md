@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.7.0 (2026-07-25)
+
+- True streaming ASR pipeline (major performance overhaul):
+  - Single FFmpeg process extracts raw PCM (16 kHz mono s16le) once;
+    transcription starts as soon as the first chunk's bytes are written —
+    first subtitle in ~10 s instead of 1–3 min of "Extracting audio..."
+  - In-memory numpy chunk slicing feeds `model.generate()` directly:
+    eliminates N per-chunk FFmpeg spawns and N temporary WAV files
+  - Fix FFmpeg stderr pipe deadlock on long videos (`-nostats -v error`
+    keeps stderr well below the 64 KB pipe buffer)
+  - Priority seek jumps the queue only when the target region is already
+    extracted; requests stay pending until fulfilled (no longer dropped)
+  - Progress messages include an ETA based on recent per-chunk inference time
+  - `VIDEO_SPLITTER_TORCH_THREADS` env var to override torch CPU threads
+    (benchmarked on 8-core CPU: 4→8 threads ≈ 1.03x, RTF stays ~0.10)
+- GUI usability:
+  - New "开始语音识别" button — explicit transcription start, disabled while running
+  - Recognized-subtitles scrolling list with click-to-jump (review position + video seek)
+  - "全部跳过" button now wired to jump to the last segment (was a dead button)
+  - Opening another video is blocked while transcription is running
+  - Transcribe button state resets on complete / error / cancel
+- Tests: 620 passed (full suite), incl. 14 new UI/handler tests
+
 ## 0.6.0 (2026-07-21)
 
 - Add streaming/incremental ASR transcription for GUI:

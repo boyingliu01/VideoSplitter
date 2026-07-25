@@ -35,6 +35,7 @@ class SplitConfig:
     resume: bool = False
     transcription_engine: str = "funasr"
     engine_config: dict = field(default_factory=dict)
+    hotword_file: str = ""  # Path to hotword document for ASR enhancement
 
     @classmethod
     def from_env(cls) -> SplitConfig:
@@ -50,4 +51,6 @@ class SplitConfig:
             c.resume = True
         if os.environ.get("VIDEO_SPLITTER_ENGINE"):
             c.transcription_engine = os.environ["VIDEO_SPLITTER_ENGINE"]
+        if os.environ.get("VIDEO_SPLITTER_HOTWORD_FILE"):
+            c.hotword_file = os.environ["VIDEO_SPLITTER_HOTWORD_FILE"]
         return c

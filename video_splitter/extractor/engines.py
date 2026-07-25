@@ -322,6 +322,7 @@ class FunASREngine(TranscriptionEngine):
         audio_path: str,
         config: SplitConfig,
         progress_callback: Optional[Callable[[float, str], None]] = None,
+        hotword: str = "",
     ) -> Dict[str, Any]:
         """Transcribe audio using FunASR Chinese ASR model.
 
@@ -334,6 +335,7 @@ class FunASREngine(TranscriptionEngine):
             audio_path: Path to the WAV audio file.
             config: SplitConfig instance (unused; kept for interface compatibility).
             progress_callback: Optional callback receiving ``(0.0-1.0, description)``.
+            hotword: Space-separated hotword string for ASR enhancement.
 
         Returns:
             Dict with ``language``, ``duration``, ``segments``.
@@ -357,11 +359,11 @@ class FunASREngine(TranscriptionEngine):
         # Decide whether to chunk
         if total_duration <= FUNASR_CHUNK_SECONDS:
             return self._transcribe_single(
-                model, audio_path, total_duration, progress_callback
+                model, audio_path, total_duration, progress_callback, hotword
             )
 
         return self._transcribe_chunked(
-            model, audio_path, total_duration, progress_callback
+            model, audio_path, total_duration, progress_callback, hotword
         )
 
     # -- internal helpers ---------------------------------------------------
@@ -484,12 +486,17 @@ class FunASREngine(TranscriptionEngine):
         audio_path: str,
         total_duration: float,
         progress_callback: Optional[Callable[[float, str], None]],
+        hotword: str = "",
     ) -> Dict[str, Any]:
         """Transcribe a short audio file in a single generate() call."""
         if progress_callback:
             progress_callback(0.1, "Running speech recognition...")
 
-        result = model.generate(input=audio_path)
+        generate_kwargs: dict = {"input": audio_path}
+        if hotword:
+            generate_kwargs["hotword"] = hotword
+
+        result = model.generate(**generate_kwargs)
 
         if progress_callback:
             progress_callback(0.8, "Processing recognition results...")
@@ -510,6 +517,7 @@ class FunASREngine(TranscriptionEngine):
         audio_path: str,
         total_duration: float,
         progress_callback: Optional[Callable[[float, str], None]],
+        hotword: str = "",
     ) -> Dict[str, Any]:
         """Transcribe a long audio file by processing fixed-size chunks."""
         n_chunks = max(1, int(total_duration // FUNASR_CHUNK_SECONDS) + 1)
@@ -534,7 +542,11 @@ class FunASREngine(TranscriptionEngine):
                         f"Recognizing speech: segment {i + 1}/{len(chunks)} ({elapsed_min})...",
                     )
 
-                result = model.generate(input=chunk_path)
+                generate_kwargs: dict = {"input": chunk_path}
+                if hotword:
+                    generate_kwargs["hotword"] = hotword
+
+                result = model.generate(**generate_kwargs)
                 segs = self._extract_segments(result)
 
                 # Shift timestamps by chunk offset and deduplicate
@@ -591,6 +603,7 @@ class FunASREngine(TranscriptionEngine):
         video_path: str,
         start_seconds: float,
         duration_seconds: float,
+        hotword: str = "",
     ) -> List[Dict[str, Any]]:
         """Transcribe a time range from a video file using an already-loaded model.
 
@@ -602,13 +615,18 @@ class FunASREngine(TranscriptionEngine):
             video_path: Path to the video/audio file.
             start_seconds: Start time of the chunk in seconds.
             duration_seconds: Duration of the chunk in seconds.
+            hotword: Space-separated hotword string for ASR enhancement.
 
         Returns:
             List of segment dicts with ``text``, ``start``, ``end`` (global time).
         """
         chunk_wav = _extract_audio_range(video_path, start_seconds, duration_seconds)
         try:
-            result = model.generate(input=chunk_wav)
+            generate_kwargs: dict = {"input": chunk_wav}
+            if hotword:
+                generate_kwargs["hotword"] = hotword
+
+            result = model.generate(**generate_kwargs)
             segments = self._extract_segments(result)
 
             # Offset timestamps to global timeline

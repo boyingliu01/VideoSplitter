@@ -556,3 +556,92 @@ class TestStreamingIntegration:
         # Saved transcript should contain corrected text
         saved = mock_save.call_args[0][1]
         assert saved["segments"][0]["text"] == "corrected text"
+
+
+# ── Skip-all / segment-activation handlers ────────────────────────────────
+
+class TestMainWindowSegmentNavigation:
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_skip_all_jumps_to_last_segment(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._controller.merge_segments([
+            {"text": "a", "start": 0.0, "end": 10.0},
+            {"text": "b", "start": 10.0, "end": 20.0},
+            {"text": "c", "start": 20.0, "end": 30.0},
+        ])
+        win._on_skip_all()
+        assert win._controller._current_index == 2
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_skip_all_no_segments_no_crash(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._on_skip_all()  # should not raise
+        assert len(win._controller._segments) == 0
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_segment_activated_jumps_to_nearest(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._video_player.seek_to = MagicMock()
+        win._controller.merge_segments([
+            {"text": "a", "start": 0.0, "end": 10.0},
+            {"text": "b", "start": 10.0, "end": 20.0},
+            {"text": "c", "start": 20.0, "end": 30.0},
+        ])
+        win._on_segment_activated(10.5)
+        assert win._controller._current_index == 1
+        # Final seek goes to the exact clicked position (ms)
+        assert win._video_player.seek_to.call_args[0][0] == 10500
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_segment_activated_no_segments_no_crash(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._video_player.seek_to = MagicMock()
+        win._on_segment_activated(12.3)  # should not raise
+        win._video_player.seek_to.assert_not_called()
+
+    @patch("gui.app.save_transcript_atomic")
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_streaming_complete_resets_transcribe_button(
+        self, mock_hc, mock_save, qapp, tmp_path
+    ):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._cleanup_streaming_thread = MagicMock()
+        fake_video = str(tmp_path / "test.mp4")
+        with open(fake_video, "wb") as f:
+            f.write(b"\x00")
+        win._current_video_path = fake_video
+        win._controller.merge_segments([
+            {"text": "a", "start": 0.0, "end": 10.0},
+        ])
+        win._subtitle_panel.set_transcribing(True)
+        assert not win._subtitle_panel._transcribe_btn.isEnabled()
+
+        win._on_streaming_complete({
+            "language": "zh", "duration": 10.0,
+            "segments": [{"text": "a", "start": 0.0, "end": 10.0}],
+        })
+        assert win._subtitle_panel._transcribe_btn.isEnabled()
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_streaming_error_resets_transcribe_button(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._cleanup_streaming_thread = MagicMock()
+        win._subtitle_panel.set_transcribing(True)
+        with patch("gui.app.QMessageBox"):
+            win._on_streaming_error("boom")
+        assert win._subtitle_panel._transcribe_btn.isEnabled()
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_on_streaming_cancelled_resets_transcribe_button(self, mock_hc, qapp):
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._cleanup_streaming_thread = MagicMock()
+        win._subtitle_panel.set_transcribing(True)
+        win._on_streaming_cancelled()
+        assert win._subtitle_panel._transcribe_btn.isEnabled()

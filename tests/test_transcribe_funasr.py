@@ -8,6 +8,7 @@ import pytest
 from video_splitter.config import SplitConfig
 from video_splitter.extractor.engines import (
     FUNASR_MODEL,
+    FUNASR_PUNC_MODEL,
     FunASREngine,
     WhisperEngine,
     create_engine,
@@ -183,7 +184,7 @@ class TestHealthCheck:
 
         assert ok is True
         assert msg == "ok"
-        fake_funasr.AutoModel.assert_called_once_with(model=FUNASR_MODEL)
+        fake_funasr.AutoModel.assert_called_once_with(model=FUNASR_MODEL, punc_model=FUNASR_PUNC_MODEL)
         mock_model.generate.assert_called_once()
 
     def test_health_check_funasr_import_error(self):
