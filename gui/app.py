@@ -169,13 +169,16 @@ class MainWindow(QMainWindow):
         self._split_panel = SplitPanel(parent=self)
         self._tab_widget.addTab(self._split_panel, "Split")
 
-        splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        splitter.addWidget(self._video_player)
-        splitter.addWidget(self._tab_widget)
-        splitter.setStretchFactor(0, 6)
-        splitter.setStretchFactor(1, 4)
+        self._splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self._splitter.addWidget(self._video_player)
+        self._splitter.addWidget(self._tab_widget)
+        self._splitter.setStretchFactor(0, 6)
+        self._splitter.setStretchFactor(1, 4)
+        # Prevent panels from collapsing to zero width
+        self._video_player.setMinimumWidth(200)
+        self._tab_widget.setMinimumWidth(300)
 
-        self.setCentralWidget(splitter)
+        self.setCentralWidget(self._splitter)
 
     def _build_status(self) -> None:
         self._status_bar_widget = StatusBarWidget()
@@ -266,6 +269,12 @@ class MainWindow(QMainWindow):
         save_action.setShortcut(QKeySequence("Ctrl+S"))
         save_action.triggered.connect(self._on_save_current)
         self.addAction(save_action)
+
+        # Ctrl+0: Reset splitter layout to default 60/40 split
+        reset_layout_action = QAction(self)
+        reset_layout_action.setShortcut(QKeySequence("Ctrl+0"))
+        reset_layout_action.triggered.connect(self._reset_splitter_layout)
+        self.addAction(reset_layout_action)
 
     def _start_health_check(self) -> None:
         """Run FunASR health check in background thread (non-blocking)."""
@@ -622,6 +631,11 @@ class MainWindow(QMainWindow):
         if self._model_loader is not None:
             self._model_loader.deleteLater()
             self._model_loader = None
+
+    def _reset_splitter_layout(self) -> None:
+        """Reset splitter to default 60/40 layout (Ctrl+0)."""
+        total = self._splitter.width()
+        self._splitter.setSizes([int(total * 0.6), int(total * 0.4)])
 
     def _on_video_seeked(self, position_ms: int) -> None:
         """Forward video seek position to streaming worker for priority transcription."""
