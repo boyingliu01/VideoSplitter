@@ -2,12 +2,18 @@
 # This file is required by xp-gate quality gates.
 
 layers:
-  - name: video_splitter
+  video_splitter:
     paths: ["video_splitter/**"]
     allowed_imports: [video_splitter, ffmpeg_skill]
-  - name: ffmpeg_skill
+  ffmpeg_skill:
     paths: ["ffmpeg-skill/**"]
     allowed_imports: [ffmpeg_skill]
-  - name: gui
+  gui:
     paths: ["gui/**"]
     allowed_imports: [gui, video_splitter, ffmpeg_skill]
+  tests:
+    paths: ["tests/**"]
+    allowed_imports: [tests, gui, video_splitter, ffmpeg_skill]
+  video_splitter_tests:
+    paths: ["video_splitter/tests/**"]
+    allowed_imports: [video_splitter, ffmpeg_skill]
