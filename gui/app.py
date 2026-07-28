@@ -30,7 +30,11 @@ from gui.workers.split_worker import SplitWorker
 from gui.workers.transcribe_worker import TranscribeWorker
 from gui.workers.streaming_transcribe_worker import StreamingTranscribeWorker
 from gui.workers.model_loader_worker import ModelLoaderWorker
-from video_splitter.review import save_transcript_atomic
+from video_splitter.review import (
+    clear_progress,
+    load_progress,
+    save_transcript_atomic,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -441,6 +445,30 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", f"Failed to load transcript:\n{exc}")
             return
 
+        # Check for saved review progress
+        progress = load_progress(path)
+        if progress and progress.get("current_index", 0) > 0:
+            idx = progress["current_index"]
+            total = len(self._controller._segments)
+            reply = QMessageBox.question(
+                self,
+                "Resume Review",
+                f"Detected previous review progress (segment {idx + 1} / {total}).\n\n"
+                "Continue from where you left off?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._controller.jump_to(idx)
+                self._status_bar_widget.set_status(
+                    f"Resumed review at segment {idx + 1}/{total}"
+                )
+            else:
+                clear_progress(path)
+        elif progress:
+            # Progress exists but index is 0 — clean up stale file
+            clear_progress(path)
+
         # Show the first segment in the subtitle panel
         seg = self._controller.current_segment()
         if seg:
@@ -507,6 +535,8 @@ class MainWindow(QMainWindow):
         result = self._controller.next()
         if result is None:
             self._status_bar_widget.set_status("Review complete — all segments reviewed")
+            if self._controller._transcript_path:
+                clear_progress(self._controller._transcript_path)
 
     def _on_save_current(self) -> None:
         seg = self._controller.current_segment()
@@ -519,6 +549,8 @@ class MainWindow(QMainWindow):
         result = self._controller.next()
         if result is None:
             self._status_bar_widget.set_status("Review complete — all segments reviewed")
+            if self._controller._transcript_path:
+                clear_progress(self._controller._transcript_path)
 
     def _on_skip_all(self) -> None:
         """Skip reviewing everything — jump straight to the last segment."""
