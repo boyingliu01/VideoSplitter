@@ -1,14 +1,18 @@
-"""Tests for StreamingTranscribeWorker — incremental ASR transcription.
+"""Tests for StreamingTranscribeWorker — fast-batch VAD mode.
 
-Covers the streaming pipeline: ffprobe → single FFmpeg PCM extraction →
-in-memory numpy chunk slicing → per-chunk inference with live signals.
+Covers the refactored pipeline:
+1. ffprobe duration probe → audio_ready signal
+2. Full audio extraction (AudioExtractor)
+3. Engine loading via create_engine("auto")
+4. model.generate(input=wav_path) → VAD auto-segmentation
+5. ALL segments emitted at once via segments_ready
+6. transcription_complete with full transcript
 """
 
 from __future__ import annotations
 
 import sys
 import os
-from collections import deque
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -19,14 +23,13 @@ if _PROJ_ROOT not in sys.path:
     sys.path.insert(0, _PROJ_ROOT)
 
 from gui.workers.streaming_transcribe_worker import (
-    BYTES_PER_SECOND,
     StreamingTranscribeWorker,
 )
 
 
 def _make_worker_with_mocks():
     """Create a worker with mocked signals."""
-    worker = StreamingTranscribeWorker(engine_name="funasr")
+    worker = StreamingTranscribeWorker(engine_name="auto")
     worker.audio_ready = MagicMock()
     worker.segments_ready = MagicMock()
     worker.chunk_completed = MagicMock()
@@ -38,47 +41,42 @@ def _make_worker_with_mocks():
     return worker
 
 
-def _fake_audio():
-    """A small fake PCM chunk as float32 numpy."""
-    return np.zeros(16000, dtype=np.float32)
+def _make_sensevoice_segments(n_total: int = 3, duration: float = 30.0):
+    """Create fake SenseVoice sentence_info segments."""
+    seg_duration = duration / n_total
+    return [
+        {"text": f"segment_{i}", "start": i * seg_duration * 1000, "end": (i + 1) * seg_duration * 1000}
+        for i in range(n_total)
+    ]
 
 
-def _run_worker_with_mocks(
-    worker,
-    total_duration=65.0,
-    chunk_segments=None,
-):
-    """Run worker with all external dependencies mocked.
+def _run_fast_batch_with_mocks(worker, total_duration=30.0, sentence_info=None, side_effect=None):
+    """Run worker in fast-batch VAD mode with all external deps mocked.
 
     Args:
-        worker: The worker instance (signals already mocked).
-        total_duration: Simulated video duration.
-        chunk_segments: Dict mapping call_idx -> list of segments returned
-            by engine._extract_segments for that call.
+        worker: Worker with mocked signals.
+        total_duration: Simulated video duration in seconds.
+        sentence_info: List of dicts to return as model.generate() result[0]["sentence_info"].
+        side_effect: If set, model.generate is replaced with this side_effect.
     """
-    if chunk_segments is None:
-        n_chunks = max(1, -(-int(total_duration) // 30))
-        chunk_segments = {
-            i: [{"text": f"text_{i}", "start": 0.0, "end": 5.0}]
-            for i in range(n_chunks)
-        }
+    if sentence_info is None:
+        sentence_info = _make_sensevoice_segments(n_total=5, duration=total_duration)
+    if side_effect is None:
+        side_effect = [{"sentence_info": sentence_info}]
 
+    # Mock model
     mock_model = MagicMock()
+    mock_model.generate.return_value = side_effect
+
+    # Mock engine with _model attribute set
     mock_engine = MagicMock()
-    mock_model.generate.return_value = object()
+    mock_engine._model = mock_model
+    mock_engine.initialize.return_value = None
 
-    def fake_extract_segments(result):
-        call_idx = fake_extract_segments._call_count
-        fake_extract_segments._call_count += 1
-        return chunk_segments.get(call_idx, [])
-
-    fake_extract_segments._call_count = 0
-    mock_engine._extract_segments.side_effect = fake_extract_segments
-
-    mock_proc = MagicMock()
-    mock_proc.poll.return_value = 0
-    mock_proc.wait.return_value = 0
-    mock_proc.returncode = 0
+    # Mock AudioExtractor
+    mock_extractor_instance = MagicMock()
+    mock_extractor_instance.get_duration.return_value = total_duration
+    mock_extractor_instance.extract.return_value = "/tmp/fake.wav"
 
     patches = [
         patch(
@@ -86,30 +84,16 @@ def _run_worker_with_mocks(
             return_value=total_duration,
         ),
         patch(
-            "gui.workers.streaming_transcribe_worker.load_funasr_model",
-            return_value=mock_model,
-        ),
-        patch(
-            "gui.workers.streaming_transcribe_worker.FunASREngine",
+            "gui.workers.streaming_transcribe_worker.create_engine",
             return_value=mock_engine,
         ),
         patch(
-            "gui.workers.streaming_transcribe_worker.subprocess.Popen",
-            return_value=mock_proc,
-        ),
-        # PCM data is always fully available in tests
-        patch(
-            "gui.workers.streaming_transcribe_worker."
-            "StreamingTranscribeWorker._pcm_size",
-            return_value=10**12,
+            "gui.workers.streaming_transcribe_worker.AudioExtractor",
+            return_value=mock_extractor_instance,
         ),
         patch(
-            "gui.workers.streaming_transcribe_worker."
-            "StreamingTranscribeWorker._read_pcm_chunk",
-            side_effect=lambda path, start, dur: _fake_audio(),
+            "gui.workers.streaming_transcribe_worker.os.unlink",
         ),
-        patch("gui.workers.streaming_transcribe_worker.os.unlink"),
-        patch("gui.workers.streaming_transcribe_worker.gc.collect"),
     ]
 
     for p in patches:
@@ -120,36 +104,40 @@ def _run_worker_with_mocks(
         for p in patches:
             p.stop()
 
-    return mock_model, mock_engine
+    return mock_model, mock_engine, mock_extractor_instance
 
 
 class TestStreamingTranscribeWorkerSignals:
-    """Test that the worker emits correct signals during transcription."""
+    """Test fast-batch VAD mode signal emissions."""
 
     def test_emits_audio_ready(self):
         """Worker emits audio_ready with total duration."""
         worker = _make_worker_with_mocks()
-        _run_worker_with_mocks(worker, total_duration=65.0)
+        _run_fast_batch_with_mocks(worker, total_duration=65.0)
 
         worker.audio_ready.emit.assert_called_once_with(65.0)
 
-    def test_emits_segments_per_chunk(self):
-        """Worker emits segments_ready for each completed chunk."""
+    def test_emits_segments_ready_once_with_all_segments(self):
+        """Worker emits segments_ready exactly ONCE with all VAD segments."""
         worker = _make_worker_with_mocks()
-        total_duration = 65.0  # 3 chunks: 0-30, 30-60, 60-65
-        chunk_segments = {
-            0: [{"text": "chunk0", "start": 0.0, "end": 10.0}],
-            1: [{"text": "chunk1", "start": 0.0, "end": 10.0}],
-            2: [{"text": "chunk2", "start": 0.0, "end": 5.0}],
-        }
-        _run_worker_with_mocks(worker, total_duration, chunk_segments)
+        sentence_info = _make_sensevoice_segments(n_total=5, duration=50.0)
+        _run_fast_batch_with_mocks(worker, total_duration=50.0, sentence_info=sentence_info)
 
-        assert worker.segments_ready.emit.call_count == 3
+        # segments_ready must be emitted EXACTLY once (fast-batch mode)
+        assert worker.segments_ready.emit.call_count == 1, (
+            f"Expected 1 segments_ready emit, got {worker.segments_ready.emit.call_count}"
+        )
+
+        # All 5 segments must be in that single emit
+        segments = worker.segments_ready.emit.call_args[0][0]
+        assert len(segments) == 5
+        assert segments[0]["text"] == "segment_0"
+        assert segments[4]["text"] == "segment_4"
 
     def test_emits_transcription_complete(self):
         """Worker emits transcription_complete with full transcript dict."""
         worker = _make_worker_with_mocks()
-        _run_worker_with_mocks(worker, total_duration=30.0)
+        _run_fast_batch_with_mocks(worker, total_duration=30.0)
 
         worker.transcription_complete.emit.assert_called_once()
         transcript = worker.transcription_complete.emit.call_args[0][0]
@@ -158,23 +146,22 @@ class TestStreamingTranscribeWorkerSignals:
         assert "segments" in transcript
 
     def test_cancel_stops_transcription(self):
-        """cancel() stops the transcription loop at next chunk boundary."""
+        """cancel() stops transcription before processing."""
         worker = _make_worker_with_mocks()
 
-        call_count = 0
+        # Setting cancelled BEFORE run starts means it exits immediately
+        worker._cancelled = True
 
-        def cancel_after_first_chunk(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count >= 1:
-                worker._cancelled = True
+        with patch(
+            "gui.workers.streaming_transcribe_worker._get_audio_duration_ffprobe",
+            return_value=60.0,
+        ):
+            worker.run("/fake/video.mp4")
 
-        worker.chunk_completed.emit = MagicMock(side_effect=cancel_after_first_chunk)
-
-        _run_worker_with_mocks(worker, total_duration=120.0)
-
-        assert call_count == 1
         worker.cancelled.emit.assert_called_once()
+        # No segments or complete signal when cancelled
+        worker.segments_ready.emit.assert_not_called()
+        worker.transcription_complete.emit.assert_not_called()
 
     def test_error_on_duration_failure(self):
         """Worker emits error if ffprobe fails."""
@@ -189,340 +176,189 @@ class TestStreamingTranscribeWorkerSignals:
         worker.error.emit.assert_called_once()
         assert "ffprobe" in worker.error.emit.call_args[0][0]
 
-    def test_short_video_single_chunk(self):
-        """Video shorter than chunk_seconds produces exactly 1 chunk."""
+    def test_progress_has_three_phases(self):
+        """Progress emits cover the 3-phase pipeline: Extracting, Transcribing, Processing."""
         worker = _make_worker_with_mocks()
-        _run_worker_with_mocks(worker, total_duration=15.0)
-
-        worker.chunk_completed.emit.assert_called()
-        worker.transcription_complete.emit.assert_called_once()
-
-    def test_segments_have_offset_timestamps(self):
-        """Segments from each chunk have globally-offset timestamps."""
-        worker = _make_worker_with_mocks()
-        total_duration = 65.0  # 3 chunks
-        chunk_segments = {
-            0: [{"text": "a", "start": 1.0, "end": 5.0}],
-            1: [{"text": "b", "start": 2.0, "end": 8.0}],
-            2: [{"text": "c", "start": 0.0, "end": 5.0}],
-        }
-        _run_worker_with_mocks(worker, total_duration, chunk_segments)
-
-        calls = worker.segments_ready.emit.call_args_list
-        # Chunk 0: start_time=0, segments keep original timestamps
-        assert calls[0][0][0][0]["start"] == 1.0
-        assert calls[0][0][0][0]["end"] == 5.0
-        # Chunk 1: offset by 30
-        assert calls[1][0][0][0]["start"] == 32.0
-        assert calls[1][0][0][0]["end"] == 38.0
-        # Chunk 2: offset by 60
-        assert calls[2][0][0][0]["start"] == 60.0
-        assert calls[2][0][0][0]["end"] == 65.0
-
-    def test_ffmpeg_failure_emits_error(self):
-        """Worker emits error if FFmpeg audio extraction fails."""
-        worker = _make_worker_with_mocks()
-
-        mock_proc = MagicMock()
-        mock_proc.poll.return_value = 1  # exits with failure immediately
-        mock_proc.returncode = 1
-        mock_proc.stderr = MagicMock()
-        mock_proc.stderr.read.return_value = b"ffmpeg error details"
-
-        with patch(
-            "gui.workers.streaming_transcribe_worker._get_audio_duration_ffprobe",
-            return_value=60.0,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.load_funasr_model",
-            return_value=MagicMock(),
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.subprocess.Popen",
-            return_value=mock_proc,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker."
-            "StreamingTranscribeWorker._pcm_size",
-            return_value=0,  # file never grows
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.os.unlink",
-        ):
-            worker.run("/fake/video.mp4")
-
-        worker.error.emit.assert_called_once()
-        assert "FFmpeg" in worker.error.emit.call_args[0][0]
-
-    def test_progress_includes_eta(self):
-        """Progress messages include an ETA once chunks complete."""
-        worker = _make_worker_with_mocks()
-        _run_worker_with_mocks(worker, total_duration=120.0)  # 4 chunks
+        _run_fast_batch_with_mocks(worker, total_duration=30.0)
 
         messages = [
             c[0][1]
             for c in worker.transcription_progress.emit.call_args_list
             if len(c[0]) >= 2 and isinstance(c[0][1], str)
         ]
-        # At least one progress message should mention ETA after first chunk
-        assert any("ETA" in m for m in messages), messages
+        # Must have at least one progress message
+        assert len(messages) > 0
+        # Check for the 3-phase progress pattern
+        all_text = " ".join(messages)
+        assert "Extracting" in all_text, f"Missing 'Extracting' phase in: {messages}"
+        assert "Transcribing" in all_text, f"Missing 'Transcribing' phase in: {messages}"
+
+    def test_segments_from_sensevoice_sentence_info(self):
+        """SenseVoice segments from sentence_info are properly formatted."""
+        worker = _make_worker_with_mocks()
+        sentence_info = [
+            {"text": "<|zh|>hello world", "start": 0, "end": 1000},
+            {"text": "<|zh|><|Speech|>second", "start": 1500, "end": 3000},
+        ]
+        _run_fast_batch_with_mocks(worker, total_duration=10.0, sentence_info=sentence_info)
+
+        segments = worker.segments_ready.emit.call_args[0][0]
+        assert len(segments) == 2
+        # SenseVoice tags should be stripped
+        assert "hello world" in segments[0]["text"]
+        assert segments[0]["start"] == 0.0
+        assert segments[0]["end"] == 1.0
+        # second segment
+        assert segments[1]["start"] == 1.5
+        assert segments[1]["end"] == 3.0
+
+    def test_segments_from_funasr_nano_timestamps(self):
+        """FunASR-Nano segments from timestamp output are properly formatted."""
+        worker = _make_worker_with_mocks()
+
+        # FunASR-Nano returns text + timestamp (not sentence_info)
+        mock_engine = MagicMock()
+        mock_model = MagicMock()
+        # Simulate FunASR-Nano output format: timestamp, no sentence_info
+        mock_model.generate.return_value = [{
+            "text": "你好世界",
+            "timestamp": [[0, 3000], [3000, 5000]],
+        }]
+        mock_engine._model = mock_model
+        mock_engine.initialize.return_value = None
+
+        mock_extractor_instance = MagicMock()
+        mock_extractor_instance.get_duration.return_value = 5.0
+        mock_extractor_instance.extract.return_value = "/tmp/fake.wav"
+
+        with patch(
+            "gui.workers.streaming_transcribe_worker._get_audio_duration_ffprobe",
+            return_value=5.0,
+        ), patch(
+            "gui.workers.streaming_transcribe_worker.create_engine",
+            return_value=mock_engine,
+        ), patch(
+            "gui.workers.streaming_transcribe_worker.AudioExtractor",
+            return_value=mock_extractor_instance,
+        ), patch(
+            "gui.workers.streaming_transcribe_worker.os.unlink",
+        ):
+            worker.run("/fake/video.mp4")
+
+        worker.segments_ready.emit.assert_called_once()
+        segments = worker.segments_ready.emit.call_args[0][0]
+        assert len(segments) > 0
+
+    def test_model_loading_progress_emitted(self):
+        """Worker emits model_loading_progress during engine initialization."""
+        worker = _make_worker_with_mocks()
+        _run_fast_batch_with_mocks(worker)
+
+        # Should have emitted loading progress
+        assert worker.model_loading_progress.emit.call_count > 0
+
+    def test_error_on_audio_extraction_failure(self):
+        """Worker emits error if AudioExtractor.extract() raises."""
+        worker = _make_worker_with_mocks()
+
+        mock_extractor_instance = MagicMock()
+        mock_extractor_instance.get_duration.return_value = 30.0
+        mock_extractor_instance.extract.side_effect = RuntimeError("FFmpeg failed")
+
+        with patch(
+            "gui.workers.streaming_transcribe_worker._get_audio_duration_ffprobe",
+            return_value=30.0,
+        ), patch(
+            "gui.workers.streaming_transcribe_worker.AudioExtractor",
+            return_value=mock_extractor_instance,
+        ):
+            worker.run("/fake/video.mp4")
+
+        worker.error.emit.assert_called_once()
+        assert "FFmpeg" in worker.error.emit.call_args[0][0]
 
 
-class TestStreamingWorkerPriority:
-    """Test request_priority() behavior."""
+class TestStreamingWorkerHotword:
+    """Test hotword handling in fast-batch mode."""
 
-    def test_request_priority_sets_chunk_index(self):
-        """request_priority sets the priority chunk index."""
-        worker = StreamingTranscribeWorker()
-        worker._completed_chunks = {0, 1}
-
-        worker.request_priority(75.0)  # 75s → chunk 2
-        assert worker._priority_chunk_index == 2
-
-    def test_request_priority_ignores_completed_chunks(self):
-        """request_priority does not set priority for already-completed chunks."""
-        worker = StreamingTranscribeWorker()
-        worker._completed_chunks = {0, 1, 2}
-
-        worker.request_priority(15.0)  # chunk 0 already done
-        assert worker._priority_chunk_index == -1
+    def test_set_hotword_updates(self):
+        """set_hotword() updates the internal hotword string."""
+        worker = StreamingTranscribeWorker(engine_name="auto")
+        worker.set_hotword("质量 红线")
+        assert worker._hotword == "质量 红线"
 
     def test_cancel_sets_flag(self):
         """cancel() sets the _cancelled flag."""
-        worker = StreamingTranscribeWorker()
+        worker = StreamingTranscribeWorker(engine_name="auto")
         assert worker._cancelled is False
         worker.cancel()
         assert worker._cancelled is True
 
-    def test_priority_reorder_in_run(self):
-        """Priority request reorders chunk processing when data is available."""
+    def test_no_priority_method(self):
+        """request_priority should NOT exist in the refactored worker."""
+        worker = StreamingTranscribeWorker(engine_name="auto")
+        assert not hasattr(worker, "request_priority"), \
+            "request_priority must be removed from fast-batch worker"
+
+    def test_no_deduplicate_method(self):
+        """_deduplicate_segments should NOT exist in the refactored worker."""
+        worker = StreamingTranscribeWorker(engine_name="auto")
+        assert not hasattr(worker, "_deduplicate_segments"), \
+            "_deduplicate_segments must be removed (VAD handles merging)"
+
+    def test_no_chunk_seconds_attr(self):
+        """_chunk_seconds attribute should NOT exist."""
+        worker = StreamingTranscribeWorker(engine_name="auto")
+        assert not hasattr(worker, "_chunk_seconds"), \
+            "_chunk_seconds must be removed"
+
+    def test_no_read_pcm_chunk(self):
+        """_read_pcm_chunk static method should NOT exist."""
+        assert not hasattr(StreamingTranscribeWorker, "_read_pcm_chunk"), \
+            "_read_pcm_chunk must be removed"
+
+
+class TestStreamingWorkerSegments:
+    """Test segment extraction and formatting."""
+
+    def test_empty_sentence_info_results_in_empty_segments(self):
+        """Empty sentence_info should emit empty segment list."""
         worker = _make_worker_with_mocks()
-        total_duration = 90.0  # 3 chunks
+        _run_fast_batch_with_mocks(
+            worker, total_duration=10.0,
+            sentence_info=[],
+        )
 
-        chunk_segments = {
-            i: [{"text": f"t{i}", "start": 0.0, "end": 5.0}]
-            for i in range(3)
-        }
+        # When no segments found, segments_ready is NOT emitted
+        # (worker only emits when there are segments)
+        worker.segments_ready.emit.assert_not_called()
+        worker.transcription_complete.emit.assert_called_once()
+        transcript = worker.transcription_complete.emit.call_args[0][0]
+        assert transcript["segments"] == []
 
-        mock_model = MagicMock()
-        mock_engine = MagicMock()
-        mock_model.generate.return_value = object()
-
-        chunk_process_order = []
-
-        def fake_read_pcm(path, start_time, duration):
-            chunk_idx = int(start_time // 30)
-            chunk_process_order.append(chunk_idx)
-            return _fake_audio()
-
-        def fake_extract_segments(result):
-            idx = chunk_process_order[-1]
-            return chunk_segments.get(idx, [])
-
-        mock_engine._extract_segments.side_effect = fake_extract_segments
-
-        mock_proc = MagicMock()
-        mock_proc.poll.return_value = 0
-        mock_proc.wait.return_value = 0
-        mock_proc.returncode = 0
-
-        # Pre-set priority for chunk 2 BEFORE running
-        worker._priority_chunk_index = 2
-
-        with patch(
-            "gui.workers.streaming_transcribe_worker._get_audio_duration_ffprobe",
-            return_value=total_duration,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.load_funasr_model",
-            return_value=mock_model,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.FunASREngine",
-            return_value=mock_engine,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.subprocess.Popen",
-            return_value=mock_proc,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker."
-            "StreamingTranscribeWorker._pcm_size",
-            return_value=10**12,  # all data available → priority allowed
-        ), patch(
-            "gui.workers.streaming_transcribe_worker."
-            "StreamingTranscribeWorker._read_pcm_chunk",
-            side_effect=fake_read_pcm,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.os.unlink",
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.gc.collect",
-        ):
-            worker.run("/fake/video.mp4")
-
-        # With priority=2 pre-set, order should be: 2 (priority), 0, 1
-        assert chunk_process_order == [2, 0, 1]
-
-    def test_priority_skipped_when_data_not_yet_extracted(self):
-        """Priority chunk is NOT jumped to when its bytes aren't written yet."""
+    def test_segments_preserve_original_order(self):
+        """Segments must preserve the order from VAD output."""
         worker = _make_worker_with_mocks()
-
-        mock_model = MagicMock()
-        mock_engine = MagicMock()
-        mock_model.generate.return_value = object()
-        mock_engine._extract_segments.return_value = []
-
-        mock_proc = MagicMock()
-        # ffmpeg finishes quickly; chunks beyond the available prefix are
-        # read in "eof" mode (clamped reads, mocked anyway)
-        mock_proc.poll.return_value = 0
-        mock_proc.wait.return_value = 0
-        mock_proc.returncode = 0
-
-        chunk_process_order = []
-
-        def fake_read_pcm(path, start_time, duration):
-            chunk_process_order.append(int(start_time // 30))
-            return _fake_audio()
-
-        # Only chunk 0's data is available when the loop starts
-        available = 30 * BYTES_PER_SECOND
-
-        worker._priority_chunk_index = 2  # wants chunk 2, not yet extracted
-
-        with patch(
-            "gui.workers.streaming_transcribe_worker._get_audio_duration_ffprobe",
-            return_value=90.0,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.load_funasr_model",
-            return_value=mock_model,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.FunASREngine",
-            return_value=mock_engine,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.subprocess.Popen",
-            return_value=mock_proc,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker."
-            "StreamingTranscribeWorker._pcm_size",
-            return_value=available,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker."
-            "StreamingTranscribeWorker._read_pcm_chunk",
-            side_effect=fake_read_pcm,
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.os.unlink",
-        ), patch(
-            "gui.workers.streaming_transcribe_worker.gc.collect",
-        ):
-            worker.run("/fake/video.mp4")
-
-        # Chunk 0 must come first; chunk 2 must not jump the queue
-        assert chunk_process_order[0] == 0
-        assert chunk_process_order == [0, 1, 2]
-
-
-class TestPcmHelpers:
-    """Unit tests for the raw-PCM read/wait helpers."""
-
-    def test_read_pcm_chunk_reads_correct_range(self, tmp_path):
-        """_read_pcm_chunk slices bytes at the right offset."""
-        pcm = tmp_path / "test.pcm"
-        # 3 seconds of 16kHz s16le: sample value = second index
-        samples = np.concatenate([
-            np.full(16000, 1, dtype=np.int16),
-            np.full(16000, 2, dtype=np.int16),
-            np.full(16000, 3, dtype=np.int16),
-        ])
-        pcm.write_bytes(samples.tobytes())
-
-        chunk = StreamingTranscribeWorker._read_pcm_chunk(
-            str(pcm), start_seconds=1.0, duration_seconds=1.0
-        )
-        assert chunk.dtype == np.float32
-        assert chunk.size == 16000
-        assert np.all(chunk == 2.0)
-
-    def test_read_pcm_chunk_clamps_short_read(self, tmp_path):
-        """Final chunk reads fewer bytes than requested without error."""
-        pcm = tmp_path / "test.pcm"
-        samples = np.full(16000, 7, dtype=np.int16)  # only 1s of data
-        pcm.write_bytes(samples.tobytes())
-
-        chunk = StreamingTranscribeWorker._read_pcm_chunk(
-            str(pcm), start_seconds=0.0, duration_seconds=30.0
-        )
-        assert chunk.size == 16000  # clamped to available bytes
-
-    def test_wait_for_data_ready(self, tmp_path):
-        """_wait_for_data returns ready when file is big enough."""
-        pcm = tmp_path / "test.pcm"
-        pcm.write_bytes(b"\x00" * 100)
-        worker = StreamingTranscribeWorker()
-        proc = MagicMock()
-        status, eof = worker._wait_for_data(str(pcm), 50, proc, False)
-        assert status == "ready"
-        assert eof is False
-
-    def test_wait_for_data_failed(self, tmp_path):
-        """_wait_for_data returns failed on non-zero ffmpeg exit."""
-        pcm = tmp_path / "test.pcm"
-        pcm.write_bytes(b"\x00" * 10)
-        worker = StreamingTranscribeWorker()
-        proc = MagicMock()
-        proc.poll.return_value = 1
-        status, eof = worker._wait_for_data(str(pcm), 10**6, proc, False)
-        assert status == "failed"
-        assert eof is True
-
-    def test_wait_for_data_cancelled(self, tmp_path):
-        """_wait_for_data returns cancelled when cancel flag is set."""
-        pcm = tmp_path / "test.pcm"
-        pcm.write_bytes(b"\x00" * 10)
-        worker = StreamingTranscribeWorker()
-        worker._cancelled = True
-        proc = MagicMock()
-        status, _ = worker._wait_for_data(str(pcm), 10**6, proc, False)
-        assert status == "cancelled"
-
-    def test_eta_string_empty_when_no_history(self):
-        worker = StreamingTranscribeWorker()
-        assert worker._eta_string(deque(), 5) == ""
-
-    def test_eta_string_formats_seconds_and_minutes(self):
-        assert StreamingTranscribeWorker._eta_string(
-            deque([2.0, 2.0]), 5
-        ) == ", ETA ~10s"
-        assert StreamingTranscribeWorker._eta_string(
-            deque([10.0]), 30
-        ) == ", ETA ~5 min"
-
-
-class TestStreamingWorkerDedup:
-    """Test _deduplicate_segments() logic."""
-
-    def test_no_existing_segments(self):
-        worker = StreamingTranscribeWorker()
-        worker._all_segments = []
-        new_segs = [
-            {"text": "a", "start": 0.0, "end": 5.0},
-            {"text": "b", "start": 6.0, "end": 10.0},
+        sentence_info = [
+            {"text": "first", "start": 0, "end": 10000},
+            {"text": "second", "start": 11000, "end": 20000},
+            {"text": "third", "start": 21000, "end": 30000},
         ]
-        result = worker._deduplicate_segments(new_segs)
-        assert len(result) == 2
+        _run_fast_batch_with_mocks(worker, total_duration=30.0, sentence_info=sentence_info)
 
-    def test_overlapping_segment_skipped(self):
-        worker = StreamingTranscribeWorker()
-        worker._all_segments = [
-            {"text": "prev", "start": 0.0, "end": 30.0},
-        ]
-        new_segs = [
-            {"text": "overlap", "start": 29.0, "end": 35.0},
-            {"text": "new", "start": 31.0, "end": 40.0},
-        ]
-        result = worker._deduplicate_segments(new_segs)
-        assert len(result) == 1
-        assert result[0]["text"] == "new"
+        segments = worker.segments_ready.emit.call_args[0][0]
+        assert segments[0]["text"] == "first"
+        assert segments[1]["text"] == "second"
+        assert segments[2]["text"] == "third"
 
-    def test_non_overlapping_passes_through(self):
-        worker = StreamingTranscribeWorker()
-        worker._all_segments = [
-            {"text": "prev", "start": 0.0, "end": 28.0},
-        ]
-        new_segs = [
-            {"text": "next", "start": 30.0, "end": 40.0},
-        ]
-        result = worker._deduplicate_segments(new_segs)
-        assert len(result) == 1
+    def test_chunk_completed_emitted_once_at_end(self):
+        """chunk_completed signal is emitted once with (1, 1) at the end."""
+        worker = _make_worker_with_mocks()
+        _run_fast_batch_with_mocks(worker, total_duration=30.0)
+
+        # In fast-batch mode, chunk_completed is emitted once
+        # with completed=1, total=1 to indicate 100%
+        assert worker.chunk_completed.emit.call_count == 1
+        completed, total = worker.chunk_completed.emit.call_args[0]
+        assert completed == 1
+        assert total == 1

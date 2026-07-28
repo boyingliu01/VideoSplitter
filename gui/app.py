@@ -40,10 +40,10 @@ logger = logging.getLogger(__name__)
 
 
 class _HealthCheckWorker(QObject):
-    """Run FunASR health check in a background thread.
+    """Run ASR engine health check in a background thread.
 
-    Uses load_funasr_model(use_cache=True) so the loaded model is cached
-    for later use by ModelLoaderWorker / StreamingTranscribeWorker.
+    Uses create_engine("auto") to auto-select GPU (FunASR-Nano) or CPU
+    (SenseVoice), then does a quick sanity check with dummy audio.
     This avoids loading the model twice at startup.
     """
 
@@ -52,12 +52,14 @@ class _HealthCheckWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            from video_splitter.extractor.engines import load_funasr_model
-            model = load_funasr_model(use_cache=True)
+            from video_splitter.extractor.engines import create_engine
+            engine = create_engine("auto")
             # Quick sanity check with dummy audio
             import numpy as np
             dummy_wav = np.zeros(16000, dtype=np.float32)
-            model.generate(input=dummy_wav)
+            if hasattr(engine, "initialize"):
+                engine.initialize()
+            engine._model.generate(input=dummy_wav)
             self.finished.emit(True, "ok")
         except Exception as exc:
             self.finished.emit(False, str(exc))
@@ -195,7 +197,7 @@ class MainWindow(QMainWindow):
 
         vp.position_changed.connect(self._on_position_changed)
 
-        # Seek → streaming worker priority request
+        # Seek handler (no-op in fast-batch mode, kept for future use)
         vp.seeked.connect(self._on_video_seeked)
 
         sp.prev_requested.connect(ctrl.prev)
@@ -716,9 +718,11 @@ class MainWindow(QMainWindow):
         self._splitter.setSizes([int(total * 0.6), int(total * 0.4)])
 
     def _on_video_seeked(self, position_ms: int) -> None:
-        """Forward video seek position to streaming worker for priority transcription."""
-        if self._streaming_worker is not None:
-            self._streaming_worker.request_priority(position_ms / 1000.0)
+        """Video seeked — no action needed in fast-batch VAD mode.
+
+        Priority seek was removed; users jump to segments via the
+        subtitle panel click-to-jump feature after transcription completes.
+        """
 
     def _on_streaming_audio_ready(self, total_duration: float) -> None:
         """Audio extraction complete — update UI."""
@@ -755,19 +759,23 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
 
     def _on_streaming_chunk_completed(self, completed: int, total: int) -> None:
-        """A chunk finished — update progress."""
-        frac = 0.1 + 0.85 * (completed / total)
+        """Processing phase complete — update progress (fast-batch: single emit at 100%)."""
+        frac = 0.1 + 0.85 * (completed / total) if total > 0 else 0.95
         self._status_bar_widget.set_progress(
-            frac, f"Recognizing segment {completed}/{total}..."
+            frac, "Processing results..."
         )
         QApplication.processEvents()
 
     def _on_streaming_complete(self, transcript: dict) -> None:
-        """All chunks transcribed — finalize.
+        """All segments transcribed and emitted — finalize.
 
         Uses the in-memory segments from ReviewController (which already
-        received all chunks via merge_segments and preserves any user
+        received all segments via merge_segments and preserves any user
         corrections made during streaming) instead of reloading from disk.
+
+        TODO (Module 2): Trigger LLM postprocessing (postprocess.py) here
+        to remove filler words, fix sentence breaks, and apply hotword
+        corrections (for CPU/SenseVoice path).
         """
         n_segs = len(self._controller._segments)
         logger.info("Streaming transcription complete: %d segments", n_segs)

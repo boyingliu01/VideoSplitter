@@ -144,9 +144,9 @@ class TestModelLoaderSignalDelivery:
         win = MainWindow()
         win._current_video_path = mock_video
 
-        # Simulate chunk completion
-        win._on_streaming_chunk_completed(2, 5)
-        assert "2/5" in win._status_bar_widget._label.text()
+        # Fast-batch mode: single emit at 100%
+        win._on_streaming_chunk_completed(1, 1)
+        assert "Processing" in win._status_bar_widget._label.text()
 
     @patch("gui.app.MainWindow._start_health_check")
     def test_streaming_complete_shows_segments(self, mock_hc, qapp, mock_video):
