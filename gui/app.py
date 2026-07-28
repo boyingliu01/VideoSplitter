@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QUrl, QObject, Signal, Slot
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, QObject, Signal, Slot
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -195,6 +195,7 @@ class MainWindow(QMainWindow):
         vp.seeked.connect(self._on_video_seeked)
 
         sp.prev_requested.connect(ctrl.prev)
+        sp.next_requested.connect(ctrl.next)
         sp.save_next_requested.connect(self._on_save_next)
         sp.skip_all_requested.connect(self._on_skip_all)
         sp.jump_requested.connect(lambda n: ctrl.jump_to(n - 1))
@@ -245,19 +246,26 @@ class MainWindow(QMainWindow):
         space_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         space_shortcut.activated.connect(self._video_player._toggle_play_pause)
 
+        # Ctrl+Shift+P as explicit play/pause fallback (Space can get
+        # intercepted by the QTextEdit on some platforms)
+        pp_action = QAction(self)
+        pp_action.setShortcut(QKeySequence("Ctrl+Shift+P"))
+        pp_action.triggered.connect(self._video_player._toggle_play_pause)
+        self.addAction(pp_action)
+
         save_next_action = QAction(self)
         save_next_action.setShortcut(QKeySequence("Ctrl+Return"))
         save_next_action.triggered.connect(self._on_save_next)
         self.addAction(save_next_action)
 
         prev_action = QAction(self)
-        prev_action.setShortcut(QKeySequence("Ctrl+Left"))
+        prev_action.setShortcut(QKeySequence("Ctrl+Shift+Left"))
         prev_action.triggered.connect(self._controller.prev)
         self.addAction(prev_action)
 
         next_action = QAction(self)
-        next_action.setShortcut(QKeySequence("Ctrl+Right"))
-        next_action.triggered.connect(self._on_next_skip)
+        next_action.setShortcut(QKeySequence("Ctrl+Shift+Right"))
+        next_action.triggered.connect(self._controller.next)
         self.addAction(next_action)
 
         jump_action = QAction(self)
@@ -475,9 +483,16 @@ class MainWindow(QMainWindow):
             self._hotword = hotwords
             self._hotword_file_path = path
             word_count = len(hotwords.split())
-            self._status_bar_widget.set_status(
-                f"Loaded {word_count} hotwords from: {os.path.basename(path)}"
-            )
+
+            if self._streaming_worker is not None:
+                self._streaming_worker.set_hotword(self._hotword)
+                self._status_bar_widget.set_status(
+                    f"Loaded {word_count} hotwords (applied to running ASR): {os.path.basename(path)}"
+                )
+            else:
+                self._status_bar_widget.set_status(
+                    f"Loaded {word_count} hotwords from: {os.path.basename(path)}"
+                )
         except Exception as exc:
             QMessageBox.warning(
                 self, "Error",
@@ -534,6 +549,37 @@ class MainWindow(QMainWindow):
         self._status_bar_widget.set_status(f"Position: {t}")
         # Sync timeline position indicator
         self._split_panel.set_current_position(secs)
+        # Auto-sync subtitle panel to playback position
+        self._sync_segment_to_position(secs)
+
+    def _sync_segment_to_position(self, position_secs: float) -> None:
+        """Auto-advance the subtitle review panel to match playback position.
+
+        Finds the segment whose time window contains the current video
+        position.  If it differs from the currently-displayed segment,
+        jumps to it so the correction panel always shows the active line.
+        Only active when segments are loaded and transcription is not
+        running (avoid fighting the streaming ``_on_streaming_segments_ready``
+        auto-jump logic).
+        """
+        if not self._controller._segments:
+            return
+        # Don't auto-sync while streaming is active — the streaming handler
+        # already manages the first-segment display.
+        if self._streaming_worker is not None:
+            return
+        # Don't auto-sync while user is actively editing (typing in the
+        # correction box would be interrupted).
+        if self._subtitle_panel._editing_triggered:
+            return
+
+        # Find the segment containing the current position
+        segments = self._controller._segments
+        for i, seg in enumerate(segments):
+            if seg.get("start", 0) <= position_secs <= seg.get("end", float("inf")):
+                if i != self._controller._current_index:
+                    self._controller.jump_to(i)
+                return
 
     def _on_segment_changed(self, data: dict) -> None:
         self._subtitle_panel.set_segment(
@@ -656,20 +702,25 @@ class MainWindow(QMainWindow):
         n_total = len(self._controller._segments)
 
         # Always show the first segment for review (once)
+        # Deferred via QTimer to prevent QMediaPlayer.setPosition() from
+        # blocking the UI thread during media playback on Windows backends.
         if n_total > 0 and self._controller._current_index == 0:
             seg = self._controller.current_segment()
             if seg:
-                self._on_segment_changed({
-                    "index": seg["index"],
-                    "total": n_total,
-                    "text": seg["text"],
-                    "start": seg["start"],
-                    "end": seg["end"],
+                QTimer.singleShot(0, lambda s=seg, n=n_total: self._on_segment_changed({
+                    "index": s["index"],
+                    "total": n,
+                    "text": s["text"],
+                    "start": s["start"],
+                    "end": s["end"],
                     "modified": False,
-                })
+                }))
 
         # Append to the scrolling recognized-segments list (click-to-jump)
         self._subtitle_panel.append_recognized_segments(segments)
+
+        # Flush pending UI events (repaints, clicks) between chunks
+        QApplication.processEvents()
 
     def _on_streaming_chunk_completed(self, completed: int, total: int) -> None:
         """A chunk finished — update progress."""
@@ -677,6 +728,7 @@ class MainWindow(QMainWindow):
         self._status_bar_widget.set_progress(
             frac, f"Recognizing segment {completed}/{total}..."
         )
+        QApplication.processEvents()
 
     def _on_streaming_complete(self, transcript: dict) -> None:
         """All chunks transcribed — finalize.
@@ -695,23 +747,18 @@ class MainWindow(QMainWindow):
         self._subtitle_panel.set_transcribing(False)
         self._cleanup_streaming_thread()
 
-        # Save the in-memory transcript to disk (preserves user corrections
-        # made during streaming, unlike reloading from worker's raw output)
+        # Defer save_transcript_atomic off the UI thread via QTimer so the
+        # save operation (disk I/O) doesn't briefly freeze the GUI.
         transcript_path = str(
             Path(self._current_video_path).with_suffix(".transcript.json")
         )
         memory_transcript = self._controller.get_transcript()
-        try:
-            save_transcript_atomic(transcript_path, memory_transcript)
-        except Exception as exc:
-            logger.error("Failed to save transcript: %s", exc)
-            QMessageBox.warning(
-                self, "Error", f"Failed to save transcript:\n{exc}"
-            )
-            return
-
-        # Ensure transcript_path is set so future save_correction calls work
-        self._controller._transcript_path = transcript_path
+        QTimer.singleShot(
+            0,
+            lambda tp=transcript_path, mt=memory_transcript: (
+                self._save_transcript_deferred(tp, mt)
+            ),
+        )
 
         # Show the first segment (or current if user was already reviewing)
         seg = self._controller.current_segment()
@@ -727,6 +774,26 @@ class MainWindow(QMainWindow):
 
         # Pass transcript to split controller for chapter detection
         self._split_controller.set_transcript(memory_transcript)
+
+    def _save_transcript_deferred(
+        self, transcript_path: str, memory_transcript: dict
+    ) -> None:
+        """Save transcript to disk on the next event-loop iteration.
+
+        Runs via QTimer.singleShot(0) to avoid blocking the UI thread
+        during the disk write in _on_streaming_complete.
+        """
+        try:
+            save_transcript_atomic(transcript_path, memory_transcript)
+        except Exception as exc:
+            logger.error("Failed to save transcript: %s", exc)
+            QMessageBox.warning(
+                self, "Error", f"Failed to save transcript:\n{exc}"
+            )
+            return
+
+        # Ensure transcript_path is set so future save_correction calls work
+        self._controller._transcript_path = transcript_path
 
     def _on_streaming_progress(self, frac: float, desc: str) -> None:
         """Progress update from streaming worker."""
