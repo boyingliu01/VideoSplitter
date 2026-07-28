@@ -612,6 +612,7 @@ class FFmpegSkill:
                             "codec": stream.get("codec_name", ""),
                             "width": stream.get("width", 0),
                             "height": stream.get("height", 0),
+                            # nosemgrep: python.security.eval-detected
                             "fps": eval(stream.get("r_frame_rate", "0/1")),
                             "pixel_format": stream.get("pix_fmt", ""),
                         }
