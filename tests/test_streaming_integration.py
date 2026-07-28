@@ -166,15 +166,16 @@ class TestStreamingWorkerWithMainWindow:
 
     @patch("gui.app.MainWindow._start_health_check")
     def test_chunk_completed_updates_progress(self, mock_hc, qapp, mock_video):
-        """Chunk completion should update progress display."""
+        """Chunk completion (fast-batch: single emit at 100%) should update progress."""
         from gui.app import MainWindow
 
         win = MainWindow()
         win._current_video_path = mock_video
 
-        win._on_streaming_chunk_completed(3, 10)
+        # Fast-batch mode: chunk_completed(1, 1) = 100%
+        win._on_streaming_chunk_completed(1, 1)
 
-        assert "3/10" in win._status_bar_widget._label.text()
+        assert "Processing" in win._status_bar_widget._label.text()
 
     @patch("gui.app.MainWindow._start_health_check")
     def test_segments_ready_merges_into_controller(self, mock_hc, qapp, mock_video):

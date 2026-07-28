@@ -460,8 +460,8 @@ class TestStreamingIntegration:
     def test_on_streaming_chunk_completed_updates_progress(self, mock_hc, qapp):
         from gui.app import MainWindow
         win = MainWindow()
-        win._on_streaming_chunk_completed(2, 5)
-        assert "2/5" in win._status_bar_widget._label.text()
+        win._on_streaming_chunk_completed(1, 1)
+        assert "Processing" in win._status_bar_widget._label.text()
 
     @patch("gui.app.MainWindow._start_health_check")
     def test_on_streaming_error(self, mock_hc, qapp):
@@ -483,13 +483,13 @@ class TestStreamingIntegration:
         assert "cancelled" in win._status_bar_widget._label.text().lower()
 
     @patch("gui.app.MainWindow._start_health_check")
-    def test_on_video_seeked_forwards_priority(self, mock_hc, qapp):
+    def test_on_video_seeked_no_worker_no_crash(self, mock_hc, qapp):
+        """_on_video_seeked is a no-op in fast-batch mode, should not crash."""
         from gui.app import MainWindow
         win = MainWindow()
         mock_worker = MagicMock()
         win._streaming_worker = mock_worker
-        win._on_video_seeked(45000)  # 45 seconds
-        mock_worker.request_priority.assert_called_once_with(45.0)
+        win._on_video_seeked(45000)  # Should not raise
 
     @patch("gui.app.MainWindow._start_health_check")
     def test_on_video_seeked_no_worker(self, mock_hc, qapp):
@@ -550,10 +550,15 @@ class TestStreamingIntegration:
         }
         win._on_streaming_complete(worker_transcript)
 
+        # Process events so QTimer.singleShot(0) fires
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
+
         # KEY ASSERTION: user correction is preserved
         assert win._controller._segments[0]["text"] == "corrected text"
         assert 0 in win._controller._modified_indices
         # Saved transcript should contain corrected text
+        assert mock_save.called, "save_transcript_atomic should be called (deferred via QTimer)"
         saved = mock_save.call_args[0][1]
         assert saved["segments"][0]["text"] == "corrected text"
 
