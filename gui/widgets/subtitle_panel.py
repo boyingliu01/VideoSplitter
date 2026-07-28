@@ -68,13 +68,13 @@ class SubtitlePanel(QWidget):
         self._correction_edit.setPlaceholderText("输入修正...")
         self._correction_edit.textChanged.connect(self._on_text_changed)
 
-        self._prev_btn = QPushButton("\u25c0 上一段", self)
+        self._prev_btn = QPushButton("\u25c0 上一段 (Ctrl+Shift+\u2190)", self)
         self._prev_btn.clicked.connect(self.prev_requested.emit)
 
-        self._next_btn = QPushButton("下一段 \u25b6", self)
+        self._next_btn = QPushButton("下一段 \u25b6 (Ctrl+Shift+\u2192)", self)
         self._next_btn.clicked.connect(self.next_requested.emit)
 
-        self._save_next_btn = QPushButton("保存并继续 \u25b6", self)
+        self._save_next_btn = QPushButton("保存并继续 \u25b6 (Ctrl+Enter)", self)
         self._save_next_btn.clicked.connect(self.save_next_requested.emit)
 
         self._skip_all_btn = QPushButton("全部跳过", self)
@@ -87,7 +87,7 @@ class SubtitlePanel(QWidget):
             lambda: self.jump_requested.emit(self._jump_spin.value())
         )
 
-        self._save_btn = QPushButton("保存", self)
+        self._save_btn = QPushButton("保存 (Ctrl+S)", self)
         self._save_btn.clicked.connect(self.save_requested.emit)
 
         self._status_label = QLabel("", self)
