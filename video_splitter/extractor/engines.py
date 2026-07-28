@@ -227,15 +227,15 @@ def _extract_audio_range(
     return output_path
 
 
-# Module-level model cache (singleton per process)
-_cached_funasr_model = None
+# Module-level model cache (dict keyed by model name)
+_cached_models: dict[str, Any] = {}
 
 
 def load_funasr_model(use_cache: bool = True):
     """Load FunASR AutoModel (public API for streaming worker).
 
-    Uses a module-level singleton cache so the model is only loaded once
-    per process. Subsequent calls return the cached instance immediately.
+    Uses a module-level cache keyed by model name so the model is only loaded
+    once per process. Subsequent calls return the cached instance immediately.
 
     Args:
         use_cache: If True (default), return cached model if available.
@@ -247,22 +247,46 @@ def load_funasr_model(use_cache: bool = True):
     Raises:
         RuntimeError: If all model keys fail to load.
     """
-    global _cached_funasr_model
-    if use_cache and _cached_funasr_model is not None:
+    global _cached_models
+    cache_key = FUNASR_MODEL
+    if use_cache and cache_key in _cached_models:
         logger.info("Returning cached FunASR model (skip reload)")
-        return _cached_funasr_model
+        return _cached_models[cache_key]
     model = _load_funasr_model()
-    _cached_funasr_model = model
+    _cached_models[cache_key] = model
+    return model
+
+
+def load_funasr_nano_model(model_name: str, use_cache: bool = True):
+    """Load a FunASR model by name with dict-based caching.
+
+    Args:
+        model_name: Model identifier (e.g. ``"FunAudioLLM/Fun-ASR-Nano-2512"``).
+        use_cache: If True (default), return cached model if available.
+
+    Returns:
+        Loaded model instance.
+
+    Raises:
+        RuntimeError: If model loading fails.
+    """
+    global _cached_models
+    if use_cache and model_name in _cached_models:
+        logger.info("Returning cached model '%s' (skip reload)", model_name)
+        return _cached_models[model_name]
+    model = _load_funasr_nano_model(model_name)
+    _cached_models[model_name] = model
     return model
 
 
 def clear_funasr_model_cache():
-    """Clear the cached FunASR model, freeing memory.
+    """Clear all cached models, freeing memory.
 
-    Next call to load_funasr_model() will reload from disk/network.
+    Next call to load_funasr_model() or load_funasr_nano_model()
+    will reload from disk/network.
     """
-    global _cached_funasr_model
-    _cached_funasr_model = None
+    global _cached_models
+    _cached_models.clear()
     gc.collect()
 
 
@@ -314,8 +338,113 @@ def _load_funasr_model():
     )
 
 
+def _extract_segments_from_timestamps(
+    text: str,
+    timestamps: list[list[int]],
+) -> list[dict[str, Any]]:
+    """Convert FunASR-Nano ``timestamp`` output to standard segment format.
+
+    FunASR-Nano returns ``timestamp`` as ``[[start_ms, end_ms], ...]`` —
+    one pair per character/word.  Punctuation characters (``。！？!?.``)
+    act as segment boundaries.
+
+    Args:
+        text: Raw text string from FunASR-Nano output.
+        timestamps: List of ``[start_ms, end_ms]`` pairs.
+
+    Returns:
+        List of segment dicts with ``text``, ``start``, ``end`` (float seconds).
+    """
+    PUNCTUATION_CHARS = frozenset({"。", "！", "？", "!", "?", "."})
+
+    if not text:
+        return []
+
+    if not timestamps:
+        return [{"text": text, "start": 0.0, "end": 0.0}]
+
+    segments: list[dict[str, Any]] = []
+    current_chars: list[str] = []
+    seg_start_ms: int | None = None
+    seg_end_ms: int = 0
+
+    for i, ch in enumerate(text):
+        if i < len(timestamps):
+            ms_start, ms_end = timestamps[i]
+        else:
+            # More characters than timestamps — use last known timestamp
+            ms_start = timestamps[-1][0]
+            ms_end = timestamps[-1][1]
+
+        if seg_start_ms is None:
+            seg_start_ms = ms_start
+
+        current_chars.append(ch)
+        seg_end_ms = ms_end
+
+        if ch in PUNCTUATION_CHARS:
+            seg_text = "".join(current_chars)
+            segments.append({
+                "text": seg_text,
+                "start": round(seg_start_ms / 1000.0, 2),
+                "end": round(seg_end_ms / 1000.0, 2),
+            })
+            current_chars = []
+            seg_start_ms = None
+            seg_end_ms = 0
+
+    # Flush remaining chars as last segment
+    if current_chars and seg_start_ms is not None:
+        seg_text = "".join(current_chars)
+        segments.append({
+            "text": seg_text,
+            "start": round(seg_start_ms / 1000.0, 2),
+            "end": round(seg_end_ms / 1000.0, 2),
+        })
+
+    return segments
+
+
+FUNASR_NANO_MODEL = "FunAudioLLM/Fun-ASR-Nano-2512"
+
+
+def _load_funasr_nano_model(model_name: str = "") -> Any:
+    """Load FunASR-Nano AutoModel with GPU kwargs.
+
+    Uses trust_remote_code=True, vad_model="fsmn-vad", hub="hf", and
+    device="cuda:0" for GPU inference with HuggingFace model hub.
+
+    Args:
+        model_name: Model identifier. Defaults to ``FUNASR_NANO_MODEL``.
+
+    Returns:
+        Loaded FunASR AutoModel instance.
+
+    Raises:
+        RuntimeError: If model loading fails.
+    """
+    from funasr import AutoModel
+
+    name = model_name or FUNASR_NANO_MODEL
+
+    try:
+        model = AutoModel(
+            model=name,
+            trust_remote_code=True,
+            vad_model="fsmn-vad",
+            vad_kwargs={"max_single_segment_time": 60000},
+            device="cuda:0",
+            hub="hf",
+        )
+        return model
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to load FunASR-Nano model '{name}': {exc}"
+        ) from exc
+
+
 class FunASREngine(TranscriptionEngine):
-    """FunASR-based Chinese ASR transcription engine."""
+    """FunASR-based Chinese ASR transcription engine (Paraformer — legacy CPU path)."""
 
     def transcribe(
         self,
@@ -642,6 +771,137 @@ class FunASREngine(TranscriptionEngine):
                 pass
 
 
+# ---------------------------------------------------------------------------
+# FunASR-Nano engine (GPU path, Phase 2a)
+# ---------------------------------------------------------------------------
+
+
+class FunASRNanoEngine(TranscriptionEngine):
+    """FunASR-Nano ASR engine — GPU path with hotword support.
+
+    Uses FunAudioLLM/Fun-ASR-Nano-2512 via HuggingFace hub with
+    trust_remote_code=True, fsmn-vad for sentence segmentation, and
+    hotword-based keyword boosting.
+    """
+
+    def __init__(
+        self,
+        model: str | None = None,
+        device: str = "cuda:0",
+        hotword: str = "",
+    ) -> None:
+        """Initialize FunASR-Nano engine.
+
+        Args:
+            model: Model identifier. Defaults to ``FUNASR_NANO_MODEL``.
+            device: Device for inference (default ``"cuda:0"``).
+            hotword: Space-separated hotword string for keyword boosting.
+        """
+        self._model_name = model or FUNASR_NANO_MODEL
+        self._device = device
+        self._hotword = hotword
+        self._model: Any = None
+
+    def initialize(self) -> None:
+        """Load FunASR-Nano AutoModel with GPU kwargs.
+
+        Raises:
+            RuntimeError: If model loading fails.
+        """
+        if self._model is not None:
+            return
+
+        try:
+            self._model = _load_funasr_nano_model(self._model_name)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load FunASR-Nano model '{self._model_name}': {exc}"
+            ) from exc
+
+    def transcribe(
+        self,
+        audio_path: str,
+        config: SplitConfig,
+        progress_callback: Callable[[float, str], None] | None = None,
+    ) -> dict[str, Any]:
+        """Transcribe audio using FunASR-Nano with VAD + hotwords.
+
+        Args:
+            audio_path: Path to the WAV audio file.
+            config: SplitConfig instance.
+            progress_callback: Optional callback receiving ``(0.0-1.0, description)``.
+
+        Returns:
+            Dict with ``language``, ``duration``, ``segments``.
+        """
+        if self._model is None:
+            if progress_callback:
+                progress_callback(0.0, "Loading FunASR-Nano model (first time may take minutes)...")
+            self.initialize()
+
+        if progress_callback:
+            progress_callback(0.05, "Running speech recognition with VAD + hotwords...")
+
+        # Build hotwords list: default kw1/kw2 + engine-specific hotwords
+        hotwords: list[str] = ["kw1", "kw2"]
+        if self._hotword:
+            extra = self._hotword.split()
+            hotwords.extend(extra)
+
+        result = self._model.generate(
+            input=[audio_path],
+            cache={},
+            batch_size=1,
+            hotwords=hotwords,
+            language="中文",
+            itn=True,
+        )
+
+        if progress_callback:
+            progress_callback(0.8, "Processing recognition results...")
+
+        # Extract timestamp-based segments
+        first = result[0] if isinstance(result, list) and result else {}
+        text = first.get("text", "")
+        timestamps = first.get("timestamp", [])
+        segments = _extract_segments_from_timestamps(text, timestamps)
+
+        duration = segments[-1]["end"] if segments else 0.0
+
+        if progress_callback:
+            progress_callback(1.0, "Done")
+
+        return {
+            "language": getattr(config, "language", "zh") or "zh",
+            "duration": duration,
+            "segments": segments,
+        }
+
+    def health_check(self) -> tuple[bool, str]:
+        """Check FunASR-Nano dependency availability.
+
+        Returns:
+            ``(True, "ok")`` or ``(False, error_message)``.
+        """
+        try:
+            from funasr import AutoModel
+
+            model = AutoModel(
+                model=self._model_name,
+                trust_remote_code=True,
+                vad_model="fsmn-vad",
+                vad_kwargs={"max_single_segment_time": 60000},
+                device=self._device,
+                hub="hf",
+            )
+            model.generate(input="")
+            return True, "ok"
+        except ImportError as e:
+            return False, f"FunASR not installed. Install: pip install funasr. ({e})"
+        except Exception as e:
+            return False, str(e)
+
+
 class WhisperEngine(TranscriptionEngine):
     """faster-whisper based transcription engine."""
 
@@ -875,7 +1135,26 @@ _ENGINE_REGISTRY: Dict[str, type[TranscriptionEngine]] = {
     "funasr": FunASREngine,
     "whisper": WhisperEngine,
     "sensevoice": SenseVoiceEngine,
+    "funasr-nano": FunASRNanoEngine,
 }
+
+
+def _select_engine() -> type[TranscriptionEngine]:
+    """Auto-detect GPU availability and return the appropriate engine class.
+
+    If CUDA is available → ``FunASRNanoEngine`` (GPU path).
+    Otherwise → ``SenseVoiceEngine`` (CPU path).
+
+    Returns:
+        A :class:`TranscriptionEngine` subclass.
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return FunASRNanoEngine
+    except ImportError:
+        pass
+    return SenseVoiceEngine
 
 
 def create_engine(
@@ -885,8 +1164,10 @@ def create_engine(
     """Factory to create a transcription engine by name.
 
     Args:
-        name: Engine name (``"funasr"``, ``"whisper"``, or ``"sensevoice"``).
-            Defaults to ``"funasr"``.
+        name: Engine name (``"funasr"``, ``"whisper"``, ``"sensevoice"``,
+            ``"funasr-nano"``, or ``"auto"``). Defaults to ``"funasr"``.
+            When ``"auto"``, selects GPU path (FunASR-Nano) if CUDA is
+            available, else CPU path (SenseVoice).
         config: Optional SplitConfig (reserved for future use).
 
     Returns:
@@ -895,10 +1176,13 @@ def create_engine(
     Raises:
         ValueError: If *name* is not a recognized engine.
     """
-    cls = _ENGINE_REGISTRY.get(name)
+    if name == "auto":
+        cls = _select_engine()
+    else:
+        cls = _ENGINE_REGISTRY.get(name)
     if cls is None:
         raise ValueError(
-            f"Unknown engine: {name!r}. Available: {list(_ENGINE_REGISTRY)}"
+            f"Unknown engine: {name!r}. Available: {list(_ENGINE_REGISTRY)} + ['auto']"
         )
     engine = cls()
     return engine

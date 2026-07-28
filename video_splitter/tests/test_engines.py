@@ -801,3 +801,485 @@ class TestSenseVoiceEngine:
         assert "<|" not in result["segments"][0]["text"]
         assert result["segments"][0]["text"] == "今天讨论质量"
 
+
+# ---------------------------------------------------------------------------
+# Phase 2a — FunASR-Nano GPU engine tests (TDD: RED phase first)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractSegmentsFromTimestamps:
+    """Test _extract_segments_from_timestamps() helper for FunASR-Nano output."""
+
+    def test_converts_timestamp_list_to_segments(self):
+        """timestamp [[start_ms, end_ms], ...] → segments with punctuation boundaries."""
+        from video_splitter.extractor.engines import _extract_segments_from_timestamps
+
+        text = "大家好。今天我们来讨论问题。结束。"
+        # FunASR-Nano returns timestamp per character/word
+        timestamps = [
+            [0, 500], [500, 1000], [1000, 1500], [1500, 2000],  # "大家好。"
+            [2000, 2500], [2500, 3000], [3000, 3500], [3500, 4000], [4000, 4500],
+            [4500, 5000], [5000, 5500], [5500, 6000], [6000, 6500], [6500, 7000],
+            # "今天我们来讨论问题。"
+            [7000, 7500], [7500, 8000], [8000, 8500],  # "结束。"
+        ]
+
+        segments = _extract_segments_from_timestamps(text, timestamps)
+
+        assert len(segments) >= 2
+        # Each segment should have text, start, end
+        for seg in segments:
+            assert "text" in seg
+            assert "start" in seg
+            assert "end" in seg
+        # First segment should end with "。"
+        assert segments[0]["text"].endswith("。")
+
+    def test_single_segment_no_punctuation(self):
+        """Text without punctuation markers produces single segment."""
+        from video_splitter.extractor.engines import _extract_segments_from_timestamps
+
+        text = "你好世界"
+        timestamps = [[0, 500], [500, 1000], [1000, 1500], [1500, 2000]]
+
+        segments = _extract_segments_from_timestamps(text, timestamps)
+
+        assert len(segments) == 1
+        assert segments[0]["text"] == "你好世界"
+        assert segments[0]["start"] == 0.0
+        assert segments[0]["end"] == 2.0
+
+    def test_empty_text_returns_empty_list(self):
+        """Empty text returns empty segment list."""
+        from video_splitter.extractor.engines import _extract_segments_from_timestamps
+
+        segments = _extract_segments_from_timestamps("", [])
+        assert segments == []
+
+        segments = _extract_segments_from_timestamps("", [[0, 500]])
+        assert segments == []
+
+    def test_text_longer_than_timestamps_graceful(self):
+        """More characters than timestamps — uses last timestamp for remaining."""
+        from video_splitter.extractor.engines import _extract_segments_from_timestamps
+
+        text = "长文本。"
+        timestamps = [[0, 1000], [1000, 2000]]  # Only 2 timestamps for 4+ chars
+
+        segments = _extract_segments_from_timestamps(text, timestamps)
+        # Should not crash, should produce at least one segment
+        assert len(segments) >= 1
+        for seg in segments:
+            assert seg["end"] > 0
+
+    def test_multiple_punctuation_boundaries(self):
+        """Each . 。! !? ? char creates a segment boundary."""
+        from video_splitter.extractor.engines import _extract_segments_from_timestamps
+
+        text = "第一句。第二句！第三句？第四句。"
+        timestamps = []
+        # Generate fake timestamps: 4 chars per segment, 500ms each
+        for i in range(len(text)):
+            start = i * 500
+            timestamps.append([start, start + 500])
+
+        segments = _extract_segments_from_timestamps(text, timestamps)
+
+        assert len(segments) == 4
+        assert segments[0]["text"] == "第一句。"
+        assert segments[1]["text"] == "第二句！"
+        assert segments[2]["text"] == "第三句？"
+        assert segments[3]["text"] == "第四句。"
+
+    def test_timestamps_rounded_to_two_decimals(self):
+        """Output timestamps are rounded to 2 decimal places."""
+        from video_splitter.extractor.engines import _extract_segments_from_timestamps
+
+        text = "测试。"
+        timestamps = [[1234, 5678], [5678, 9123]]  # ms with odd values
+
+        segments = _extract_segments_from_timestamps(text, timestamps)
+
+        for seg in segments:
+            # Check that start/end are floats with at most 2 decimal places
+            start_str = f"{seg['start']:.2f}"
+            assert float(start_str) == seg["start"]
+
+
+class TestFunASRNanoEngine:
+    """Test FunASRNanoEngine — GPU path with AutoModel + hotwords."""
+
+    FUNASR_NANO_MODEL = "FunAudioLLM/Fun-ASR-Nano-2512"
+
+    def test_engine_registered_as_funasr_nano(self):
+        """FunASRNanoEngine is registered as 'funasr-nano'."""
+        from video_splitter.extractor.engines import _ENGINE_REGISTRY, FunASRNanoEngine
+
+        assert "funasr-nano" in _ENGINE_REGISTRY
+        assert _ENGINE_REGISTRY["funasr-nano"] is FunASRNanoEngine
+
+    def test_create_engine_funasr_nano(self):
+        """create_engine('funasr-nano') returns FunASRNanoEngine instance."""
+        from video_splitter.extractor.engines import create_engine, FunASRNanoEngine
+
+        engine = create_engine("funasr-nano")
+        assert isinstance(engine, FunASRNanoEngine)
+
+    def test_default_init_params(self):
+        """Default __init__ stores model, device, hotword params."""
+        from video_splitter.extractor.engines import FunASRNanoEngine
+
+        engine = FunASRNanoEngine()
+        assert engine._model_name == self.FUNASR_NANO_MODEL
+        assert engine._device == "cuda:0"
+        assert engine._hotword == ""
+
+    def test_custom_init_params(self):
+        """__init__ accepts custom model, device, hotword."""
+        from video_splitter.extractor.engines import FunASRNanoEngine
+
+        engine = FunASRNanoEngine(
+            model="custom/model",
+            device="cuda:1",
+            hotword="质量 管理",
+        )
+        assert engine._model_name == "custom/model"
+        assert engine._device == "cuda:1"
+        assert engine._hotword == "质量 管理"
+
+    def test_initialize_loads_auto_model_with_gpu_kwargs(self):
+        """initialize() loads AutoModel with trust_remote_code, vad_model, hub='hf'."""
+        from video_splitter.extractor.engines import FunASRNanoEngine
+
+        mock_auto_model = MagicMock(return_value=MagicMock())
+        mock_funasr = MagicMock()
+        mock_funasr.AutoModel = mock_auto_model
+
+        with patch.dict(sys.modules, {"funasr": mock_funasr}):
+            engine = FunASRNanoEngine()
+            engine.initialize()
+
+        mock_auto_model.assert_called_once()
+        call_kwargs = mock_auto_model.call_args[1]
+        assert call_kwargs["model"] == self.FUNASR_NANO_MODEL
+        assert call_kwargs["trust_remote_code"] is True
+        assert call_kwargs["vad_model"] == "fsmn-vad"
+        assert call_kwargs["device"] == "cuda:0"
+        assert call_kwargs["hub"] == "hf"
+        assert "vad_kwargs" in call_kwargs
+        assert call_kwargs["vad_kwargs"]["max_single_segment_time"] == 60000
+
+    def test_initialize_only_once(self):
+        """initialize() is idempotent — AutoModel called only on first call."""
+        from video_splitter.extractor.engines import FunASRNanoEngine
+
+        mock_auto_model = MagicMock(return_value=MagicMock())
+        mock_funasr = MagicMock()
+        mock_funasr.AutoModel = mock_auto_model
+
+        with patch.dict(sys.modules, {"funasr": mock_funasr}):
+            engine = FunASRNanoEngine()
+            engine.initialize()
+            engine.initialize()
+
+        assert mock_auto_model.call_count == 1
+
+    def test_initialize_raises_on_failure(self):
+        """initialize() raises RuntimeError when AutoModel fails."""
+        from video_splitter.extractor.engines import FunASRNanoEngine
+
+        mock_auto_model = MagicMock(side_effect=MemoryError("Cuda OOM"))
+        mock_funasr = MagicMock()
+        mock_funasr.AutoModel = mock_auto_model
+
+        with patch.dict(sys.modules, {"funasr": mock_funasr}):
+            engine = FunASRNanoEngine()
+            with pytest.raises(RuntimeError, match="Failed to load FunASR-Nano"):
+                engine.initialize()
+
+    def test_transcribe_calls_generate_with_correct_params(self):
+        """transcribe() calls model.generate() with FunASR-Nano-specific params."""
+        from video_splitter.extractor.engines import FunASRNanoEngine
+
+        engine = FunASRNanoEngine()
+        mock_model = MagicMock()
+        mock_model.generate.return_value = [{
+            "text": "你好世界。",
+            "timestamp": [[0, 500], [500, 1000], [1000, 1500], [1500, 2000], [2000, 2500]],
+        }]
+        engine._model = mock_model
+
+        config = MagicMock()
+        config.language = "zh"
+
+        result = engine.transcribe("/fake/audio.wav", config)
+
+        mock_model.generate.assert_called_once()
+        call_kwargs = mock_model.generate.call_args[1]
+        assert call_kwargs["input"] == ["/fake/audio.wav"]
+        assert "cache" in call_kwargs
+        assert call_kwargs["batch_size"] == 1
+        assert call_kwargs["language"] == "中文"
+        assert call_kwargs["itn"] is True
+        assert "hotwords" in call_kwargs
+        assert call_kwargs["hotwords"] == ["kw1", "kw2"]
+
+    def test_transcribe_handles_custom_hotwords(self):
+        """transcribe() passes engine._hotword as extra hotwords when set."""
+        from video_splitter.extractor.engines import FunASRNanoEngine
+
+        engine = FunASRNanoEngine(hotword="质量 QIWC")
+        mock_model = MagicMock()
+        mock_model.generate.return_value = [{
+            "text": "质量测试。",
+            "timestamp": [[0, 500], [500, 1000], [1000, 1500], [1500, 2000], [2000, 2500]],
+        }]
+        engine._model = mock_model
+
+        config = MagicMock()
+        config.language = "zh"
+
+        result = engine.transcribe("/fake/audio.wav", config)
+
+        call_kwargs = mock_model.generate.call_args[1]
+        hotwords = call_kwargs["hotwords"]
+        assert "质量" in hotwords
+        assert "QIWC" in hotwords
+
+    def test_transcribe_returns_correct_format(self):
+        """transcribe() returns dict with language, duration, segments."""
+        from video_splitter.extractor.engines import FunASRNanoEngine
+
+        engine = FunASRNanoEngine()
+        mock_model = MagicMock()
+        mock_model.generate.return_value = [{
+            "text": "你好世界。",
+            "timestamp": [
+                [0, 500], [500, 1000], [1000, 1500],
+                [1500, 2000], [2000, 2500],
+            ],
+        }]
+        engine._model = mock_model
+
+        config = MagicMock()
+        config.language = "zh"
+
+        result = engine.transcribe("/fake/audio.wav", config)
+
+        assert "language" in result
+        assert result["language"] == "zh"
+        assert "duration" in result
+        assert "segments" in result
+        assert len(result["segments"]) >= 1
+        assert result["segments"][0]["text"] == "你好世界。"
+
+    def test_transcribe_passes_progress_callback(self):
+        """transcribe() invokes progress_callback at checkpoints."""
+        from video_splitter.extractor.engines import FunASRNanoEngine
+
+        engine = FunASRNanoEngine()
+        mock_model = MagicMock()
+        mock_model.generate.return_value = [{
+            "text": "测试。",
+            "timestamp": [[0, 1000], [1000, 2000], [2000, 3000]],
+        }]
+        engine._model = mock_model
+
+        config = MagicMock()
+        config.language = "zh"
+
+        calls = []
+        def progress_collector(frac: float, desc: str) -> None:
+            calls.append((frac, desc))
+
+        result = engine.transcribe("/fake/audio.wav", config, progress_callback=progress_collector)
+
+        assert len(calls) > 0
+        assert calls[-1][0] == 1.0
+
+    def test_transcribe_empty_result_handled(self):
+        """transcribe() handles empty generate result gracefully."""
+        from video_splitter.extractor.engines import FunASRNanoEngine
+
+        engine = FunASRNanoEngine()
+        mock_model = MagicMock()
+        mock_model.generate.return_value = [{"text": "", "timestamp": []}]
+        engine._model = mock_model
+
+        config = MagicMock()
+        config.language = "zh"
+
+        result = engine.transcribe("/fake/silent.wav", config)
+
+        assert result["segments"] == []
+        assert result["duration"] == 0.0
+
+    def test_health_check_success(self):
+        """health_check returns (True, 'ok') when FunASR-Nano loads."""
+        from video_splitter.extractor.engines import FunASRNanoEngine
+
+        mock_model_instance = MagicMock()
+        mock_model_instance.generate.return_value = [{"text": "ok", "timestamp": []}]
+        mock_auto_model = MagicMock(return_value=mock_model_instance)
+        mock_funasr = MagicMock()
+        mock_funasr.AutoModel = mock_auto_model
+
+        with patch.dict(sys.modules, {"funasr": mock_funasr}):
+            engine = FunASRNanoEngine()
+            ok, msg = engine.health_check()
+
+        assert ok is True
+        assert msg == "ok"
+
+    def test_health_check_failure(self):
+        """health_check returns (False, msg) when FunASR-Nano fails."""
+        from video_splitter.extractor.engines import FunASRNanoEngine
+
+        mock_auto_model = MagicMock(side_effect=ImportError("no funasr"))
+        mock_funasr = MagicMock()
+        mock_funasr.AutoModel = mock_auto_model
+
+        with patch.dict(sys.modules, {"funasr": mock_funasr}):
+            engine = FunASRNanoEngine()
+            ok, msg = engine.health_check()
+
+        assert ok is False
+        assert "no funasr" in msg
+
+
+class TestEngineSelection:
+    """Test _select_engine() GPU/CPU auto-detection logic."""
+
+    def test_auto_selects_gpu_cuda_available(self):
+        """auto picks FunASRNanoEngine when torch.cuda.is_available() is True."""
+        from video_splitter.extractor.engines import _select_engine, FunASRNanoEngine
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+
+        with patch.dict(sys.modules, {"torch": mock_torch}):
+            engine_cls = _select_engine()
+
+        assert engine_cls is FunASRNanoEngine
+
+    def test_auto_selects_cpu_no_cuda(self):
+        """auto picks SenseVoiceEngine when torch.cuda.is_available() is False."""
+        from video_splitter.extractor.engines import _select_engine, SenseVoiceEngine
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = False
+
+        with patch.dict(sys.modules, {"torch": mock_torch}):
+            engine_cls = _select_engine()
+
+        assert engine_cls is SenseVoiceEngine
+
+    def test_create_engine_auto_returns_selected(self):
+        """create_engine('auto') uses _select_engine() to pick."""
+        from video_splitter.extractor.engines import create_engine, SenseVoiceEngine
+
+        # Default without torch → CPU path
+        engine = create_engine("auto")
+        assert isinstance(engine, SenseVoiceEngine)
+
+    def test_create_engine_auto_with_cuda_returns_gpu(self):
+        """create_engine('auto') with CUDA returns FunASRNanoEngine."""
+        from video_splitter.extractor.engines import create_engine, FunASRNanoEngine
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+
+        with patch.dict(sys.modules, {"torch": mock_torch}):
+            engine = create_engine("auto")
+
+        assert isinstance(engine, FunASRNanoEngine)
+
+    def test_create_engine_sensevoice_still_works(self):
+        """Explicit 'sensevoice' engine name still works."""
+        from video_splitter.extractor.engines import create_engine, SenseVoiceEngine
+
+        engine = create_engine("sensevoice")
+        assert isinstance(engine, SenseVoiceEngine)
+
+    def test_create_engine_funasr_nano_explicit_works(self):
+        """Explicit 'funasr-nano' engine name works."""
+        from video_splitter.extractor.engines import create_engine, FunASRNanoEngine
+
+        engine = create_engine("funasr-nano")
+        assert isinstance(engine, FunASRNanoEngine)
+
+
+class TestModelCacheDict:
+    """Test that _cached_models dict replaces singleton _cached_funasr_model."""
+
+    def setup_method(self):
+        """Clear model cache before each test."""
+        from video_splitter.extractor.engines import clear_funasr_model_cache
+        clear_funasr_model_cache()
+
+    def test_cached_models_is_dict(self):
+        """_cached_models is a dict, not a singleton."""
+        from video_splitter.extractor import engines as eng_mod
+
+        # The module-level cache should be a dict
+        assert isinstance(eng_mod._cached_models, dict)
+
+    def test_two_models_cached_independently(self):
+        """Two different model names cache independently."""
+        from video_splitter.extractor import engines as eng_mod
+        import video_splitter.extractor.engines
+
+        model_a = MagicMock()
+        model_b = MagicMock()
+
+        with patch.object(video_splitter.extractor.engines, "_load_funasr_nano_model", return_value=model_a):
+            eng_mod.load_funasr_nano_model("model_A")
+        with patch.object(video_splitter.extractor.engines, "_load_funasr_nano_model", return_value=model_b):
+            eng_mod.load_funasr_nano_model("model_B")
+
+        assert eng_mod._cached_models["model_A"] is model_a
+        assert eng_mod._cached_models["model_B"] is model_b
+        assert eng_mod._cached_models["model_A"] is not eng_mod._cached_models["model_B"]
+
+    def test_second_call_returns_cached(self):
+        """Second call for same model returns cached instance."""
+        from video_splitter.extractor import engines as eng_mod
+        import video_splitter.extractor.engines
+
+        model = MagicMock()
+        with patch.object(video_splitter.extractor.engines, "_load_funasr_nano_model", return_value=model) as mock_load:
+            r1 = eng_mod.load_funasr_nano_model("model_X")
+            r2 = eng_mod.load_funasr_nano_model("model_X")
+
+        mock_load.assert_called_once()
+        assert r1 is r2
+        assert r1 is model
+
+    def test_force_reload_bypasses_cache(self):
+        """use_cache=False forces reload even for same model name."""
+        from video_splitter.extractor import engines as eng_mod
+        import video_splitter.extractor.engines
+
+        model1 = MagicMock()
+        model2 = MagicMock()
+        with patch.object(video_splitter.extractor.engines, "_load_funasr_nano_model", side_effect=[model1, model2]):
+            r1 = eng_mod.load_funasr_nano_model("model_X")
+            r2 = eng_mod.load_funasr_nano_model("model_X", use_cache=False)
+
+        assert r1 is model1
+        assert r2 is model2
+
+    def test_clear_cache_removes_all(self):
+        """clear_funasr_model_cache() clears the entire dict."""
+        from video_splitter.extractor import engines as eng_mod
+        import video_splitter.extractor.engines
+
+        with patch.object(video_splitter.extractor.engines, "_load_funasr_nano_model", return_value=MagicMock()):
+            eng_mod.load_funasr_nano_model("model_A")
+            eng_mod.load_funasr_nano_model("model_B")
+
+        assert len(eng_mod._cached_models) >= 2
+
+        eng_mod.clear_funasr_model_cache()
+        assert eng_mod._cached_models == {}
+

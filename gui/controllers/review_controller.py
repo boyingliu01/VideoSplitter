@@ -173,9 +173,9 @@ class ReviewController(QObject):
 
     def _save_progress(self) -> None:
         save_progress(self._transcript_path, {
+            "version": 2,
             "current_index": self._current_index,
             "total": len(self._segments),
-            "modified_count": len(self._modified_indices),
             "modified_indices": list(self._modified_indices),
         })
 
