@@ -22,6 +22,7 @@ class SubtitlePanel(QWidget):
     """Review tab: transcript display + edit area + navigation."""
 
     prev_requested = Signal()
+    next_requested = Signal()
     save_next_requested = Signal()
     skip_all_requested = Signal()
     jump_requested = Signal(int)
@@ -70,6 +71,9 @@ class SubtitlePanel(QWidget):
         self._prev_btn = QPushButton("\u25c0 上一段", self)
         self._prev_btn.clicked.connect(self.prev_requested.emit)
 
+        self._next_btn = QPushButton("下一段 \u25b6", self)
+        self._next_btn.clicked.connect(self.next_requested.emit)
+
         self._save_next_btn = QPushButton("保存并继续 \u25b6", self)
         self._save_next_btn.clicked.connect(self.save_next_requested.emit)
 
@@ -97,6 +101,7 @@ class SubtitlePanel(QWidget):
 
         nav_layout = QHBoxLayout()
         nav_layout.addWidget(self._prev_btn)
+        nav_layout.addWidget(self._next_btn)
         nav_layout.addWidget(self._save_next_btn)
         nav_layout.addWidget(self._skip_all_btn)
         nav_layout.addWidget(self._jump_spin)

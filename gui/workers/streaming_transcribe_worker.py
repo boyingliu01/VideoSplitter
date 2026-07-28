@@ -24,6 +24,7 @@ import math
 import os
 import subprocess
 import tempfile
+import threading
 import time
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional, Set
@@ -90,6 +91,7 @@ class StreamingTranscribeWorker(QObject):
         self._config = config if config is not None else SplitConfig()
         self._chunk_seconds: int = FUNASR_CHUNK_SECONDS
         self._hotword = hotword  # Space-separated hotword string for ASR enhancement
+        self._hotword_lock = threading.Lock()
 
         # State (only accessed from worker thread, except priority/cancel)
         self._priority_chunk_index: int = -1  # -1 = no priority request
@@ -259,8 +261,10 @@ class StreamingTranscribeWorker(QObject):
             result = None
             try:
                 generate_kwargs: dict = {"input": audio}
-                if self._hotword:
-                    generate_kwargs["hotword"] = self._hotword
+                with self._hotword_lock:
+                    current_hotword = self._hotword
+                if current_hotword:
+                    generate_kwargs["hotword"] = current_hotword
 
                 result = model.generate(**generate_kwargs)
                 new_segments = engine._extract_segments(result)
@@ -285,7 +289,7 @@ class StreamingTranscribeWorker(QObject):
             self.chunk_completed.emit(len(self._completed_chunks), n_chunks)
 
             chunks_since_gc += 1
-            if chunks_since_gc >= 3:
+            if chunks_since_gc >= 10:
                 gc.collect()
                 chunks_since_gc = 0
 
@@ -463,3 +467,14 @@ class StreamingTranscribeWorker(QObject):
         Thread-safe: bool assignment is atomic under CPython GIL.
         """
         self._cancelled = True
+
+    @Slot(str)
+    def set_hotword(self, hotword: str) -> None:
+        """Update the hotword mid-transcription (thread-safe).
+
+        Callable from the GUI thread while ``_transcribe_loop`` runs in a
+        worker thread.  A ``threading.Lock`` guards the read/write, which is
+        correct and light under CPython's GIL for a plain string assignment.
+        """
+        with self._hotword_lock:
+            self._hotword = hotword
