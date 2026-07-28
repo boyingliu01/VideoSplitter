@@ -607,6 +607,9 @@ class MainWindow(QMainWindow):
         if self._subtitle_panel._editing_triggered:
             return
 
+        # Push highlight to the subtitle panel's scrollable list
+        self._subtitle_panel.sync_highlight(position_secs)
+
         # Find the segment containing the current position
         segments = self._controller._segments
         for i, seg in enumerate(segments):
