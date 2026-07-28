@@ -1,0 +1,99 @@
+# Semgrep SAST configuration for VideoSplitter
+# Gate 9 — Static Application Security Testing
+#
+# Rules are a curated subset of semgrep's Python security rules.
+# Full rule list: https://semgrep.dev/p/python
+
+rules:
+  # --- Injection & Input Validation ---
+  - id: python.security.os-system.path-traversal
+    pattern-either:
+      - pattern: os.system($CMD)
+    message: "os.system() is dangerous. Use subprocess.run() with shell=False."
+    severity: WARNING
+    languages: [python]
+
+  - id: python.security.subprocess-shell-true
+    pattern-either:
+      - pattern: subprocess.$FUNC(..., shell=True, ...)
+      - pattern: subprocess.$FUNC(..., shell=cmd, ...)
+    message: "Avoid shell=True in subprocess calls. Use list arguments instead."
+    severity: WARNING
+    languages: [python]
+
+  - id: python.security.eval-detected
+    pattern-either:
+      - pattern: eval(...)
+    message: "eval() is a security risk. Avoid executing arbitrary code."
+    severity: ERROR
+    languages: [python]
+
+  # --- Secrets & Credentials ---
+  - id: python.security.unmasked-secret
+    patterns:
+      - pattern-either:
+          - pattern: $VAR = "$SECRET"
+          - pattern: $VAR = '$SECRET'
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (?i)(password|secret|api_key|token|auth)
+      - metavariable-regex:
+          metavariable: $SECRET
+          regex: ^(?!\${).{8,}
+    message: "Hardcoded secret detected. Use environment variables instead."
+    severity: ERROR
+    languages: [python]
+
+  # --- Crypto & Hashing ---
+  - id: python.security.weak-hash
+    pattern-either:
+      - pattern: hashlib.md5(...)
+      - pattern: hashlib.sha1(...)
+    message: "Weak hash function detected. Use hashlib.sha256() instead."
+    severity: WARNING
+    languages: [python]
+
+  # --- File Operations ---
+  - id: python.security.insecure-file-permissions
+    patterns:
+      - pattern: os.chmod($PATH, $MODE)
+      - metavariable-regex:
+          metavariable: $MODE
+          regex: "(0o)?777"
+    message: "World-writable file permissions detected. Restrict to 0o644 or 0o755."
+    severity: WARNING
+    languages: [python]
+
+  # --- Pickle/Deserialization ---
+  - id: python.security.unsafe-deserialization
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+      - pattern: yaml.load(..., Loader=yaml.Loader)
+      - pattern: yaml.load(..., Loader=yaml.UnsafeLoader)
+    message: "Unsafe deserialization detected. Use yaml.safe_load() or avoid pickle."
+    severity: ERROR
+    languages: [python]
+
+  # --- Requests without timeout ---
+  - id: python.security.requests-no-timeout
+    pattern-either:
+      - pattern: requests.get(..., timeout=$TIMEOUT)
+    message: "Always set a timeout on HTTP requests to avoid hanging."
+    severity: WARNING
+    languages: [python]
+    paths:
+      exclude:
+        - "tests/**"
+        - "video_splitter/tests/**"
+
+  # --- SQL Injection (if applicable) ---
+  - id: python.security.sql-string-concatenation
+    pattern-either:
+      - pattern: cursor.execute("..." + $VAR)
+      - pattern: cursor.execute(f"...{$VAR}...")
+      - pattern: cursor.execute("..." % $VAR)
+      - pattern: cursor.execute("...".format(...))
+    message: "Possible SQL injection. Use parameterized queries."
+    severity: ERROR
+    languages: [python]
