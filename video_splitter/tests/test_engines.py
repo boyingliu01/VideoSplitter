@@ -444,3 +444,360 @@ class TestPunctuationModel:
             call_kwargs = mock_auto_model.call_args[1]
             assert "punc_model" not in call_kwargs
 
+
+# ---------------------------------------------------------------------------
+# SenseVoice Phase 1 tests — CPU path (TDD: write tests first, see them FAIL)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractSegmentsFromSentenceInfo:
+    """Test _extract_segments_from_sentence_info() helper."""
+
+    def test_converts_sentence_info_to_segments(self):
+        """sentence_info with ms timestamps is converted to seconds."""
+        from video_splitter.extractor.engines import _extract_segments_from_sentence_info
+
+        sentence_info = [
+            {"text": "今天我们来讨论", "start": 0, "end": 2500},
+            {"text": "质量管理体系", "start": 2500, "end": 5000},
+            {"text": "的关键节点", "start": 5500, "end": 8000},
+        ]
+        segments = _extract_segments_from_sentence_info(sentence_info)
+
+        assert len(segments) == 3
+        assert segments[0] == {"text": "今天我们来讨论", "start": 0.0, "end": 2.5, "id": 0}
+        assert segments[1] == {"text": "质量管理体系", "start": 2.5, "end": 5.0, "id": 1}
+        assert segments[2] == {"text": "的关键节点", "start": 5.5, "end": 8.0, "id": 2}
+
+    def test_skips_empty_text(self):
+        """Empty text entries are skipped."""
+        from video_splitter.extractor.engines import _extract_segments_from_sentence_info
+
+        sentence_info = [
+            {"text": "valid", "start": 0, "end": 1000},
+            {"text": "", "start": 1000, "end": 1500},
+            {"text": "also valid", "start": 1500, "end": 3000},
+        ]
+        segments = _extract_segments_from_sentence_info(sentence_info)
+
+        assert len(segments) == 2
+        assert segments[0]["text"] == "valid"
+        assert segments[1]["text"] == "also valid"
+
+    def test_empty_list_returns_empty(self):
+        """Empty sentence_info returns empty list."""
+        from video_splitter.extractor.engines import _extract_segments_from_sentence_info
+
+        assert _extract_segments_from_sentence_info([]) == []
+        assert _extract_segments_from_sentence_info(None) == []
+
+    def test_rounds_timestamps_to_two_decimals(self):
+        """Timestamps are rounded to 2 decimal places."""
+        from video_splitter.extractor.engines import _extract_segments_from_sentence_info
+
+        sentence_info = [
+            {"text": "test", "start": 1234, "end": 5678},
+        ]
+        segments = _extract_segments_from_sentence_info(sentence_info)
+
+        assert segments[0]["start"] == 1.23
+        assert segments[0]["end"] == 5.68
+
+
+class TestSenseVoiceOutputPostprocessing:
+    """Test emotion/event tag stripping from SenseVoice output."""
+
+    def test_emotion_tags_are_stripped(self):
+        """Emotion tags like <|Speech|>, <|NEUTRAL|> etc are removed."""
+        from video_splitter.extractor.engines import _postprocess_sensevoice_text
+
+        raw = "<|zh|><|Speech|>今天我们来讨论质量管理体系"
+        cleaned = _postprocess_sensevoice_text(raw)
+
+        assert "今天我们来讨论质量管理体系" in cleaned
+        assert "<|zh|>" not in cleaned
+        assert "<|Speech|>" not in cleaned
+
+    def test_event_tags_are_stripped(self):
+        """Event tags like <|BGM|>, <|Applause|> etc are removed."""
+        from video_splitter.extractor.engines import _postprocess_sensevoice_text
+
+        raw = "<|zh|><|BGM|>今天我们讨论质量管理"
+        cleaned = _postprocess_sensevoice_text(raw)
+
+        assert "今天我们讨论质量管理" in cleaned
+        assert "<|BGM|>" not in cleaned
+
+    def test_preserves_whitespace_and_punctuation(self):
+        """Normal text content including spaces and punctuation is preserved."""
+        from video_splitter.extractor.engines import _postprocess_sensevoice_text
+
+        raw = "<|zh|><|Speech|>今天，我们来讨论一下：质量管理体系的关键节点。"
+        cleaned = _postprocess_sensevoice_text(raw)
+
+        assert "今天" in cleaned
+        assert "质量管理体系的关键节点" in cleaned
+        # Should not be empty after cleaning
+        assert len(cleaned.strip()) > 0
+
+    def test_uses_rich_transcription_postprocess(self):
+        """Verify we use funasr's rich_transcription_postprocess."""
+        from video_splitter.extractor.engines import _postprocess_sensevoice_text
+
+        # Test with known SenseVoice output format
+        raw = "<|zh|><|Speech|>测试文本"
+        cleaned = _postprocess_sensevoice_text(raw)
+
+        assert "测试文本" in cleaned
+
+
+class TestSenseVoiceEngine:
+    """Test SenseVoiceEngine — CPU path with fsmn-vad."""
+
+    def test_engine_is_in_registry(self):
+        """SenseVoiceEngine is registered in _ENGINE_REGISTRY."""
+        from video_splitter.extractor.engines import _ENGINE_REGISTRY, SenseVoiceEngine
+
+        assert "sensevoice" in _ENGINE_REGISTRY
+        assert _ENGINE_REGISTRY["sensevoice"] is SenseVoiceEngine
+
+    def test_create_engine_sensevoice(self):
+        """create_engine('sensevoice') returns SenseVoiceEngine instance."""
+        from video_splitter.extractor.engines import create_engine, SenseVoiceEngine
+
+        engine = create_engine("sensevoice")
+        assert isinstance(engine, SenseVoiceEngine)
+
+    def test_initialization_stores_params(self):
+        """__init__ stores model, device, hotword params."""
+        from video_splitter.extractor.engines import SenseVoiceEngine
+
+        engine = SenseVoiceEngine(
+            model="iic/SenseVoiceSmall",
+            device="cpu",
+            hotword="质量红线 QIWC",
+        )
+        assert engine._model_name == "iic/SenseVoiceSmall"
+        assert engine._device == "cpu"
+        assert engine._hotword == "质量红线 QIWC"
+
+    def test_default_params(self):
+        """Default __init__ params are correct."""
+        from video_splitter.extractor.engines import SenseVoiceEngine
+
+        engine = SenseVoiceEngine()
+        assert engine._model_name == "iic/SenseVoiceSmall"
+        assert engine._device == "cpu"
+        assert engine._hotword == ""
+
+    def test_initialize_loads_auto_model(self):
+        """initialize() loads AutoModel with correct params."""
+        from video_splitter.extractor.engines import SenseVoiceEngine
+
+        mock_auto_model = MagicMock(return_value=MagicMock())
+        mock_funasr = MagicMock()
+        mock_funasr.AutoModel = mock_auto_model
+
+        with patch.dict(sys.modules, {"funasr": mock_funasr}):
+            engine = SenseVoiceEngine()
+            engine.initialize()
+
+        mock_auto_model.assert_called_once()
+        call_kwargs = mock_auto_model.call_args[1]
+        assert call_kwargs["model"] == "iic/SenseVoiceSmall"
+        assert call_kwargs["vad_model"] == "fsmn-vad"
+        assert call_kwargs["device"] == "cpu"
+        assert "vad_kwargs" in call_kwargs
+
+    def test_initialize_raises_on_failure(self):
+        """initialize() raises RuntimeError when AutoModel fails."""
+        from video_splitter.extractor.engines import SenseVoiceEngine
+
+        mock_auto_model = MagicMock(side_effect=MemoryError("OOM"))
+        mock_funasr = MagicMock()
+        mock_funasr.AutoModel = mock_auto_model
+
+        with patch.dict(sys.modules, {"funasr": mock_funasr}):
+            engine = SenseVoiceEngine()
+            with pytest.raises(RuntimeError, match="Failed to load SenseVoice"):
+                engine.initialize()
+
+    def test_transcribe_calls_generate_with_correct_params(self):
+        """transcribe() calls model.generate() with SenseVoice-specific params."""
+        from video_splitter.extractor.engines import SenseVoiceEngine
+
+        engine = SenseVoiceEngine()
+        mock_model = MagicMock()
+        mock_model.generate.return_value = [{
+            "text": "<|zh|><|Speech|>测试",
+            "sentence_info": [
+                {"text": "测试", "start": 0, "end": 1000},
+            ],
+        }]
+        engine._model = mock_model
+
+        config = MagicMock()
+        config.language = "zh"
+
+        result = engine.transcribe("/fake/audio.wav", config)
+
+        mock_model.generate.assert_called_once()
+        call_kwargs = mock_model.generate.call_args[1]
+        assert call_kwargs["input"] == "/fake/audio.wav"
+        assert call_kwargs["language"] == "auto"
+        assert call_kwargs["use_itn"] is True
+        assert call_kwargs["batch_size_s"] == 60
+        assert call_kwargs["merge_vad"] is True
+        assert call_kwargs["merge_length_s"] == 15
+        assert "cache" in call_kwargs
+
+    def test_transcribe_passes_progress_callback(self):
+        """transcribe() invokes progress_callback at checkpoints."""
+        from video_splitter.extractor.engines import SenseVoiceEngine
+
+        engine = SenseVoiceEngine()
+        mock_model = MagicMock()
+        mock_model.generate.return_value = [{
+            "text": "<|zh|><|Speech|>测试",
+            "sentence_info": [],
+        }]
+        engine._model = mock_model
+
+        config = MagicMock()
+        config.language = "zh"
+
+        calls = []
+        def progress_collector(frac: float, desc: str) -> None:
+            calls.append((frac, desc))
+
+        result = engine.transcribe("/fake/audio.wav", config, progress_callback=progress_collector)
+
+        assert len(calls) > 0
+        # First call should be at 0.05 (model already loaded, skip 0.0)
+        assert calls[0][0] >= 0.0
+        # Last call should be at 1.0
+        assert calls[-1][0] == 1.0
+
+    def test_transcribe_returns_correct_format(self):
+        """transcribe() returns dict with language, duration, segments."""
+        from video_splitter.extractor.engines import SenseVoiceEngine
+
+        engine = SenseVoiceEngine()
+        mock_model = MagicMock()
+        mock_model.generate.return_value = [{
+            "text": "<|zh|><|Speech|>测试文本",
+            "sentence_info": [
+                {"text": "测试文本", "start": 0, "end": 2500},
+            ],
+        }]
+        engine._model = mock_model
+
+        config = MagicMock()
+        config.language = "zh"
+
+        result = engine.transcribe("/fake/audio.wav", config)
+
+        assert "language" in result
+        assert result["language"] == "zh"
+        assert "duration" in result
+        assert result["duration"] == 2.5
+        assert "segments" in result
+        assert len(result["segments"]) == 1
+        assert result["segments"][0]["text"] == "测试文本"
+        assert result["segments"][0]["start"] == 0.0
+        assert result["segments"][0]["end"] == 2.5
+
+    def test_transcribe_handles_vad_zero_segments(self):
+        """transcribe() handles VAD returning 0 segments (silent audio)."""
+        from video_splitter.extractor.engines import SenseVoiceEngine
+
+        engine = SenseVoiceEngine()
+        mock_model = MagicMock()
+        mock_model.generate.return_value = [{
+            "text": "<|zh|><|nospeech|>",
+            "sentence_info": [],
+        }]
+        engine._model = mock_model
+
+        config = MagicMock()
+        config.language = "zh"
+
+        result = engine.transcribe("/fake/silent.wav", config)
+
+        assert result["segments"] == []
+        assert result["duration"] == 0.0
+
+    def test_transcribe_defensive_sentence_info_access(self):
+        """transcribe() handles generate() result without sentence_info key."""
+        from video_splitter.extractor.engines import SenseVoiceEngine
+
+        engine = SenseVoiceEngine()
+        mock_model = MagicMock()
+        # Result without sentence_info key
+        mock_model.generate.return_value = [{"text": "no sentence_info here"}]
+        engine._model = mock_model
+
+        config = MagicMock()
+        config.language = "zh"
+
+        result = engine.transcribe("/fake/audio.wav", config)
+
+        assert result["segments"] == []
+
+    def test_health_check_success(self):
+        """health_check returns (True, 'ok') when SenseVoice loads."""
+        from video_splitter.extractor.engines import SenseVoiceEngine
+
+        mock_model_instance = MagicMock()
+        mock_model_instance.generate.return_value = [{"text": "ok"}]
+        mock_auto_model = MagicMock(return_value=mock_model_instance)
+        mock_funasr = MagicMock()
+        mock_funasr.AutoModel = mock_auto_model
+
+        with patch.dict(sys.modules, {"funasr": mock_funasr}):
+            engine = SenseVoiceEngine()
+            ok, msg = engine.health_check()
+
+        assert ok is True
+        assert msg == "ok"
+
+    def test_health_check_failure(self):
+        """health_check returns (False, msg) when SenseVoice errors."""
+        from video_splitter.extractor.engines import SenseVoiceEngine
+
+        mock_auto_model = MagicMock(side_effect=ImportError("no funasr"))
+        mock_funasr = MagicMock()
+        mock_funasr.AutoModel = mock_auto_model
+
+        with patch.dict(sys.modules, {"funasr": mock_funasr}):
+            engine = SenseVoiceEngine()
+            ok, msg = engine.health_check()
+
+        assert ok is False
+        assert "no funasr" in msg
+
+    def test_postprocess_strips_tags_from_sentence_info(self):
+        """Text in sentence_info has emotion/event tags stripped."""
+        from video_splitter.extractor.engines import SenseVoiceEngine
+
+        engine = SenseVoiceEngine()
+        mock_model = MagicMock()
+        # SenseVoice returns text with emotion tags
+        mock_model.generate.return_value = [{
+            "text": "<|zh|><|Speech|>今天讨论质量",
+            "sentence_info": [
+                {"text": "今天讨论质量", "start": 0, "end": 3000},
+            ],
+        }]
+        engine._model = mock_model
+
+        config = MagicMock()
+        config.language = "zh"
+
+        result = engine.transcribe("/fake/audio.wav", config)
+
+        assert len(result["segments"]) == 1
+        # Text should be clean - no tags
+        assert "<|" not in result["segments"][0]["text"]
+        assert result["segments"][0]["text"] == "今天讨论质量"
+

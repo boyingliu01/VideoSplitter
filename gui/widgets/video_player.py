@@ -31,6 +31,7 @@ class VideoPlayerWidget(QWidget):
         self._video_widget = QVideoWidget(self)
 
         self._play_pause_btn = QPushButton("\u25b6", self)
+        self._play_pause_btn.setToolTip("播放/暂停 (Space / Ctrl+Shift+P)")
         self._play_pause_btn.setFixedWidth(40)
         self._play_pause_btn.clicked.connect(self._toggle_play_pause)
 

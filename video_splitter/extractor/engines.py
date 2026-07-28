@@ -689,9 +689,192 @@ class WhisperEngine(TranscriptionEngine):
             return False, str(e)
 
 
+# ---------------------------------------------------------------------------
+# SenseVoice engine (CPU path, Phase 1)
+# ---------------------------------------------------------------------------
+
+SENSEVOICE_MODEL = "iic/SenseVoiceSmall"
+
+
+def _extract_segments_from_sentence_info(
+    sentence_info: list[dict] | None,
+) -> list[dict]:
+    """Convert SenseVoice sentence_info to standard segment format.
+
+    Args:
+        sentence_info: List of ``{text, start, end}`` dicts (ms timestamps),
+            or ``None`` / empty list.
+
+    Returns:
+        List of segment dicts with ``text``, ``start``, ``end`` (float seconds),
+        and ``id`` (int, zero-based index).
+    """
+    if not sentence_info:
+        return []
+
+    segments = []
+    for i, item in enumerate(sentence_info):
+        text = item.get("text", "").strip()
+        if not text:
+            continue
+        segments.append({
+            "text": text,
+            "start": round(item.get("start", 0) / 1000.0, 2),
+            "end": round(item.get("end", 0) / 1000.0, 2),
+            "id": i,
+        })
+    return segments
+
+
+def _postprocess_sensevoice_text(raw_text: str) -> str:
+    """Strip emotion/event tags from SenseVoice output.
+
+    Uses FunASR's ``rich_transcription_postprocess`` to remove tags like
+    ``<|zh|>``, ``<|Speech|>``, ``<|NEUTRAL|>``, ``<|BGM|>``, etc.
+
+    Args:
+        raw_text: Raw SenseVoice output text.
+
+    Returns:
+        Cleaned text with tags removed.
+    """
+    from funasr.utils.postprocess_utils import rich_transcription_postprocess
+    return rich_transcription_postprocess(raw_text)
+
+
+class SenseVoiceEngine(TranscriptionEngine):
+    """SenseVoice ASR engine — CPU path with fsmn-vad.
+
+    Uses SenseVoiceSmall (non-autoregressive, ~250MB) for accurate Chinese
+    speech recognition on CPU. VAD handles natural sentence segmentation,
+    eliminating chunk-based logic entirely.
+    """
+
+    def __init__(
+        self,
+        model: str | None = None,
+        device: str = "cpu",
+        hotword: str = "",
+    ) -> None:
+        """Initialize SenseVoice engine.
+
+        Args:
+            model: Model identifier. Defaults to ``"iic/SenseVoiceSmall"``.
+            device: Device for inference (always ``"cpu"`` for this path).
+            hotword: Hotword string (preserved for GPU path, not used by SenseVoice).
+        """
+        self._model_name = model or SENSEVOICE_MODEL
+        self._device = device
+        self._hotword = hotword
+        self._model: Any = None
+
+    def initialize(self) -> None:
+        """Load SenseVoiceSmall AutoModel with fsmn-vad.
+
+        Raises:
+            RuntimeError: If model loading fails.
+        """
+        if self._model is not None:
+            return
+
+        from funasr import AutoModel
+
+        try:
+            self._model = AutoModel(
+                model=self._model_name,
+                vad_model="fsmn-vad",
+                vad_kwargs={"max_single_segment_time": 60000},
+                device=self._device,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load SenseVoice model '{self._model_name}': {exc}"
+            ) from exc
+
+    def transcribe(
+        self,
+        audio_path: str,
+        config: SplitConfig,
+        progress_callback: Callable[[float, str], None] | None = None,
+    ) -> dict[str, Any]:
+        """Transcribe audio using SenseVoice with VAD segmentation.
+
+        Args:
+            audio_path: Path to the WAV audio file.
+            config: SplitConfig instance.
+            progress_callback: Optional callback receiving ``(0.0-1.0, description)``.
+
+        Returns:
+            Dict with ``language``, ``duration``, ``segments``.
+        """
+        if self._model is None:
+            if progress_callback:
+                progress_callback(0.0, "Loading SenseVoice model (first time may take minutes)...")
+            self.initialize()
+
+        if progress_callback:
+            progress_callback(0.05, "Running speech recognition with VAD...")
+
+        result = self._model.generate(
+            input=audio_path,
+            cache={},
+            language="auto",
+            use_itn=True,
+            batch_size_s=60,
+            merge_vad=True,
+            merge_length_s=15,
+        )
+
+        if progress_callback:
+            progress_callback(0.8, "Processing recognition results...")
+
+        # Extract sentence_info and convert to standard segment format
+        first = result[0] if isinstance(result, list) and result else {}
+        sentence_info = first.get("sentence_info") or []
+        segments = _extract_segments_from_sentence_info(sentence_info)
+
+        # Post-process text in each segment (strip emotion/event tags)
+        for seg in segments:
+            seg["text"] = _postprocess_sensevoice_text(seg["text"])
+
+        duration = segments[-1]["end"] if segments else 0.0
+
+        if progress_callback:
+            progress_callback(1.0, "Done")
+
+        return {
+            "language": getattr(config, "language", "zh") or "zh",
+            "duration": duration,
+            "segments": segments,
+        }
+
+    def health_check(self) -> tuple[bool, str]:
+        """Check SenseVoice dependency availability.
+
+        Returns:
+            ``(True, "ok")`` or ``(False, error_message)``.
+        """
+        try:
+            from funasr import AutoModel
+
+            model = AutoModel(
+                model=self._model_name,
+                vad_model="fsmn-vad",
+                vad_kwargs={"max_single_segment_time": 60000},
+                device=self._device,
+            )
+            model.generate(input="")
+            return True, "ok"
+        except ImportError as e:
+            return False, f"FunASR not installed. Install: pip install funasr. ({e})"
+        except Exception as e:
+            return False, str(e)
+
+
 _ENGINE_REGISTRY: Dict[str, type[TranscriptionEngine]] = {
     "funasr": FunASREngine,
     "whisper": WhisperEngine,
+    "sensevoice": SenseVoiceEngine,
 }
 
 
@@ -702,7 +885,8 @@ def create_engine(
     """Factory to create a transcription engine by name.
 
     Args:
-        name: Engine name (``"funasr"`` or ``"whisper"``). Defaults to ``"funasr"``.
+        name: Engine name (``"funasr"``, ``"whisper"``, or ``"sensevoice"``).
+            Defaults to ``"funasr"``.
         config: Optional SplitConfig (reserved for future use).
 
     Returns:
