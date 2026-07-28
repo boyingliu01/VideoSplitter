@@ -2,20 +2,50 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+import bisect
+
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QHBoxLayout,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
+    QListView,
     QPushButton,
     QSpinBox,
+    QStyledItemDelegate,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from video_splitter.review import format_timestamp
+
+
+class _SegmentHighlightDelegate(QStyledItemDelegate):
+    """Custom delegate that draws a gold background on the highlighted row."""
+
+    HIGHLIGHT_COLOR = QColor("#FFF3CD")
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._highlight_row: int = -1
+
+    def set_highlight_row(self, row: int) -> None:
+        """Store the row to highlight and trigger a repaint of the viewport."""
+        if row != self._highlight_row:
+            self._highlight_row = row
+            p = self.parent()
+            if p is not None:
+                p.viewport().update()
+
+    def paint(self, painter, option, index) -> None:
+        """Draw the item with a gold background if it's the highlighted row."""
+        if index.row() == self._highlight_row:
+            painter.save()
+            painter.fillRect(option.rect, self.HIGHLIGHT_COLOR)
+            painter.restore()
+        super().paint(painter, option, index)
 
 
 class SubtitlePanel(QWidget):
@@ -35,6 +65,13 @@ class SubtitlePanel(QWidget):
         super().__init__(parent)
         self._editing_triggered: bool = False
 
+        # -- Playback-synced highlight state --
+        self._segment_starts: list[float] = []
+        self._pending_position: float = -1.0
+        self._sync_timer = QTimer(self)
+        self._sync_timer.setInterval(250)
+        self._sync_timer.timeout.connect(self._do_sync_highlight)
+
         # Prominent speech-recognition starter (top of panel)
         self._transcribe_btn = QPushButton("开始语音识别", self)
         self._transcribe_btn.setMinimumHeight(32)
@@ -49,12 +86,23 @@ class SubtitlePanel(QWidget):
         self._timestamp_label = QLabel("[00:00:00.000]", self)
         self._timestamp_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Scrolling list of segments recognized so far (streaming view).
-        # Hidden until the first segments arrive; rows are click-to-jump.
-        self._segment_list = QListWidget(self)
-        self._segment_list.setMaximumHeight(140)
-        self._segment_list.setVisible(False)
-        self._segment_list.itemClicked.connect(self._on_segment_item_clicked)
+        # Scrollable full-subtitle list (QListView + QStandardItemModel)
+        self._segment_model = QStandardItemModel(self)
+        self._segment_list_view = QListView(self)
+        self._segment_list_view.setModel(self._segment_model)
+        self._segment_list_view.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self._segment_list_view.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        self._segment_list_view.setMaximumHeight(140)
+        self._segment_list_view.setVisible(False)
+
+        self._segment_delegate = _SegmentHighlightDelegate(self._segment_list_view)
+        self._segment_list_view.setItemDelegate(self._segment_delegate)
+
+        self._segment_list_view.clicked.connect(self._on_list_row_clicked)
 
         self._original_label = QLabel("", self)
         self._original_label.setWordWrap(True)
@@ -111,7 +159,7 @@ class SubtitlePanel(QWidget):
         layout.addWidget(self._transcribe_btn)
         layout.addLayout(header_layout)
         layout.addSpacing(4)
-        layout.addWidget(self._segment_list)
+        layout.addWidget(self._segment_list_view)
         layout.addSpacing(4)
         layout.addWidget(QLabel("原文:", self))
         layout.addWidget(self._original_label)
@@ -121,6 +169,44 @@ class SubtitlePanel(QWidget):
         layout.addSpacing(8)
         layout.addWidget(self._status_label)
         layout.addLayout(nav_layout)
+
+    # -- playback-synced highlight ------------------------------------------
+
+    def sync_highlight(self, position_secs: float) -> None:
+        """Schedule a highlight sync to the given playback position.
+
+        Uses a 250 ms QTimer throttle to avoid excessive repaints.
+        """
+        self._pending_position = position_secs
+        if not self._sync_timer.isActive():
+            self._sync_timer.start()
+
+    def _do_sync_highlight(self) -> None:
+        """Find the segment whose window contains _pending_position and
+        highlight its row in the QListView."""
+        if not self._segment_starts or self._pending_position < 0:
+            self._sync_timer.stop()
+            return
+
+        # bisect_right: find the first segment whose start > position,
+        # then the current segment is the one before it (row-1).
+        # If position is before the first segment start, row 0 is highlighted.
+        idx = bisect.bisect_right(self._segment_starts, self._pending_position)
+        row = max(0, idx - 1)
+        row = min(row, self._segment_model.rowCount() - 1)
+
+        self._segment_delegate.set_highlight_row(row)
+
+        # Scroll so the highlighted row is visible at the top of the viewport
+        model_idx = self._segment_model.index(row, 0)
+        if model_idx.isValid():
+            self._segment_list_view.scrollTo(
+                model_idx, QAbstractItemView.ScrollHint.PositionAtTop
+            )
+
+        self._sync_timer.stop()
+
+    # -- edit / correction ---------------------------------------------------
 
     def _on_text_changed(self) -> None:
         if not self._editing_triggered:
@@ -145,6 +231,15 @@ class SubtitlePanel(QWidget):
         self._jump_spin.blockSignals(True)
         self._jump_spin.setValue(index + 1)
         self._jump_spin.blockSignals(False)
+
+        # Update list highlight to the active segment
+        if index < self._segment_model.rowCount():
+            self._segment_delegate.set_highlight_row(index)
+            model_idx = self._segment_model.index(index, 0)
+            if model_idx.isValid():
+                self._segment_list_view.scrollTo(
+                    model_idx, QAbstractItemView.ScrollHint.PositionAtTop
+                )
 
     def set_correction(self, text: str) -> None:
         self._correction_edit.blockSignals(True)
@@ -191,29 +286,41 @@ class SubtitlePanel(QWidget):
         """Append newly recognized segments to the scrolling list.
 
         Each row shows ``[mm:ss] text`` and stores the segment start time
-        (seconds, float) in ``Qt.UserRole`` for click-to-jump.
+        (seconds, float) in ``Qt.UserRole + 1`` for click-to-jump.
         """
         if not segments:
             return
-        if not self._segment_list.isVisible():
-            self._segment_list.setVisible(True)
+        if not self._segment_list_view.isVisible():
+            self._segment_list_view.setVisible(True)
+
         for seg in segments:
             start = float(seg.get("start", 0.0))
             m, s = divmod(int(start), 60)
             text = seg.get("text", "")
-            item = QListWidgetItem(f"[{m:02d}:{s:02d}] {text}")
-            item.setData(Qt.ItemDataRole.UserRole, start)
+            label = f"[{m:02d}:{s:02d}] {text}"
+
+            item = QStandardItem(label)
+            item.setData(start, Qt.ItemDataRole.UserRole + 1)
             item.setToolTip(text)
-            self._segment_list.addItem(item)
-        self._segment_list.scrollToBottom()
+            self._segment_model.appendRow(item)
+
+            self._segment_starts.append(start)
+
+        self._segment_list_view.scrollToBottom()
 
     def clear_recognized_segments(self) -> None:
         """Clear and hide the recognized-segments list."""
-        self._segment_list.clear()
-        self._segment_list.setVisible(False)
+        self._segment_model.clear()
+        self._segment_starts.clear()
+        self._segment_list_view.setVisible(False)
 
-    def _on_segment_item_clicked(self, item: QListWidgetItem) -> None:
+    def _on_list_row_clicked(self, index) -> None:
         """Forward a row click as a segment_activated(start_seconds) signal."""
-        start = item.data(Qt.ItemDataRole.UserRole)
+        if not index.isValid():
+            return
+        item = self._segment_model.itemFromIndex(index)
+        if item is None:
+            return
+        start = item.data(Qt.ItemDataRole.UserRole + 1)
         if start is not None:
             self.segment_activated.emit(float(start))

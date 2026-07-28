@@ -196,10 +196,10 @@ class TestSubtitlePanelStreamingUI:
         assert panel._transcribe_btn.isEnabled()
         assert panel._transcribe_btn.text() == "开始语音识别"
 
-    def test_segment_list_initially_hidden(self, qapp):
+    def test_segment_list_view_initially_hidden(self, qapp):
         from gui.widgets.subtitle_panel import SubtitlePanel
         panel = SubtitlePanel()
-        assert panel._segment_list.isHidden()
+        assert panel._segment_list_view.isHidden()
 
     def test_append_recognized_segments_populates_list(self, qapp):
         from PySide6.QtCore import Qt
@@ -209,21 +209,23 @@ class TestSubtitlePanelStreamingUI:
             {"text": "第一句", "start": 65.0, "end": 70.0},
             {"text": "第二句", "start": 130.5, "end": 135.0},
         ])
-        assert not panel._segment_list.isHidden()
-        assert panel._segment_list.count() == 2
-        item0 = panel._segment_list.item(0)
+        assert not panel._segment_list_view.isHidden()
+        assert panel._segment_model.rowCount() == 2
+        item0 = panel._segment_model.item(0, 0)
+        assert item0 is not None
         assert item0.text() == "[01:05] 第一句"
-        assert item0.data(Qt.ItemDataRole.UserRole) == 65.0
-        item1 = panel._segment_list.item(1)
+        assert item0.data(Qt.ItemDataRole.UserRole + 1) == 65.0
+        item1 = panel._segment_model.item(1, 0)
+        assert item1 is not None
         assert item1.text() == "[02:10] 第二句"
-        assert item1.data(Qt.ItemDataRole.UserRole) == 130.5
+        assert item1.data(Qt.ItemDataRole.UserRole + 1) == 130.5
 
     def test_append_empty_segments_keeps_list_hidden(self, qapp):
         from gui.widgets.subtitle_panel import SubtitlePanel
         panel = SubtitlePanel()
         panel.append_recognized_segments([])
-        assert panel._segment_list.isHidden()
-        assert panel._segment_list.count() == 0
+        assert panel._segment_list_view.isHidden()
+        assert panel._segment_model.rowCount() == 0
 
     def test_clear_recognized_segments(self, qapp):
         from gui.widgets.subtitle_panel import SubtitlePanel
@@ -232,8 +234,8 @@ class TestSubtitlePanelStreamingUI:
             {"text": "x", "start": 1.0, "end": 2.0},
         ])
         panel.clear_recognized_segments()
-        assert panel._segment_list.count() == 0
-        assert panel._segment_list.isHidden()
+        assert panel._segment_model.rowCount() == 0
+        assert panel._segment_list_view.isHidden()
 
     def test_segment_item_click_emits_segment_activated(self, qapp):
         from unittest.mock import MagicMock
@@ -244,5 +246,96 @@ class TestSubtitlePanelStreamingUI:
         ])
         spy = MagicMock()
         panel.segment_activated.connect(spy)
-        panel._on_segment_item_clicked(panel._segment_list.item(0))
+        # Simulate clicking the first row's QModelIndex
+        idx = panel._segment_model.index(0, 0)
+        panel._segment_list_view.clicked.emit(idx)
         spy.assert_called_once_with(65.0)
+
+    # -- QListView highlight sync tests (Module 3) --------------------------
+
+    def test_sync_highlight_sets_delegate_row(self, qapp):
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.append_recognized_segments([
+            {"text": "a", "start": 0.0, "end": 5.0},
+            {"text": "b", "start": 5.0, "end": 10.0},
+            {"text": "c", "start": 10.0, "end": 15.0},
+        ])
+        assert len(panel._segment_starts) == 3
+        panel._pending_position = 6.0
+        panel._do_sync_highlight()
+        assert panel._segment_delegate._highlight_row == 1  # b is at 5.0–10.0
+
+    def test_sync_highlight_before_first_segment(self, qapp):
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.append_recognized_segments([
+            {"text": "a", "start": 3.0, "end": 6.0},
+        ])
+        panel._pending_position = 1.0
+        panel._do_sync_highlight()
+        assert panel._segment_delegate._highlight_row == 0
+
+    def test_sync_highlight_after_last_segment(self, qapp):
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.append_recognized_segments([
+            {"text": "a", "start": 1.0, "end": 4.0},
+            {"text": "b", "start": 4.0, "end": 8.0},
+        ])
+        panel._pending_position = 10.0
+        panel._do_sync_highlight()
+        assert panel._segment_delegate._highlight_row == 1  # last row
+
+    def test_sync_highlight_no_segments_no_crash(self, qapp):
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel._pending_position = 5.0
+        panel._do_sync_highlight()  # should not raise
+
+    def test_sync_highlight_public_slot_starts_timer(self, qapp):
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.append_recognized_segments([
+            {"text": "x", "start": 0.0, "end": 5.0},
+        ])
+        panel.sync_highlight(2.5)
+        assert panel._sync_timer.isActive()
+        # Let the timer fire
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(300, lambda: None)  # dummy — just verify no crash
+        # Actually drive the timer
+        panel._do_sync_highlight()
+        assert not panel._sync_timer.isActive()
+
+    def test_delegate_highlight_row_triggers_viewport_update(self, qapp):
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        from unittest.mock import MagicMock
+        panel = SubtitlePanel()
+        panel._segment_list_view.viewport = MagicMock()
+        panel._segment_delegate.set_highlight_row(2)
+        panel._segment_list_view.viewport().update.assert_called_once()
+
+    def test_set_segment_updates_list_highlight(self, qapp):
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.append_recognized_segments([
+            {"text": "first", "start": 0.0, "end": 5.0},
+            {"text": "second", "start": 5.0, "end": 10.0},
+            {"text": "third", "start": 10.0, "end": 15.0},
+        ])
+        panel.set_segment(index=1, total=3, text="second", start_time=5.0, end_time=10.0)
+        assert panel._segment_delegate._highlight_row == 1
+
+    def test_model_row_count_matches_segment_starts(self, qapp):
+        from gui.widgets.subtitle_panel import SubtitlePanel
+        panel = SubtitlePanel()
+        panel.append_recognized_segments([
+            {"text": "a", "start": 0.0, "end": 2.0},
+            {"text": "b", "start": 2.0, "end": 4.0},
+            {"text": "c", "start": 4.0, "end": 6.0},
+            {"text": "d", "start": 6.0, "end": 8.0},
+        ])
+        assert panel._segment_model.rowCount() == 4
+        assert len(panel._segment_starts) == 4
+        assert panel._segment_starts == [0.0, 2.0, 4.0, 6.0]
