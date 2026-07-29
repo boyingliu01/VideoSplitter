@@ -142,7 +142,11 @@ class TestCLITranscribe:
 
 
 class TestCLIBatch:
-    """CLI 'batch' command — process multiple videos."""
+    """CLI 'batch' command — multi-file processing logic.
+
+    Batch tests verify the iteration/error-handling/summary logic
+    of cmd_batch(), not the full pipeline (too slow via subprocess).
+    """
 
     def test_batch_empty_directory(self, tmp_path):
         """Batch with no videos should report no files found."""
@@ -150,14 +154,99 @@ class TestCLIBatch:
         assert result.returncode == 0
         assert "No .mp4 files found" in result.stdout
 
-    def test_batch_with_single_video(self, test_video, tmp_path):
-        """Batch with one video should process it."""
-        import shutil
-        video_copy = str(tmp_path / "batch_test.mp4")
-        shutil.copy2(test_video, video_copy)
+    def test_batch_cmd_iterates_over_videos(self, tmp_path):
+        """cmd_batch should iterate over all .mp4 files and produce summary.
 
-        # Batch will try to run full pipeline (needs LLM), so it may fail
-        # at chapter detection. But it should at least start processing.
-        result = _run_cli("batch", str(tmp_path), timeout=600)
-        # Either succeeds or fails gracefully
-        assert result.returncode == 0 or "Failed" in result.stdout or "error" in result.stdout.lower()
+        Tests the batch command's orchestration logic (iteration, error
+        handling, summary) by mocking the pipeline at the subprocess level.
+        This avoids the 5-10 minute full pipeline run via subprocess.
+        """
+        import shutil
+        from unittest.mock import patch, MagicMock
+
+        from video_splitter.cli import cmd_batch
+
+        # Create dummy video file
+        video = str(tmp_path / "fake.mp4")
+        with open(video, "wb") as f:
+            f.write(b"\x00" * 100)
+
+        # Mock Pipeline to avoid real transcription/LLM calls
+        fake_pipeline = MagicMock()
+        fake_pipeline.run.return_value = {
+            "output_files": ["seg1.mp4", "seg2.mp4"],
+            "chapters": [{"title": "Ch1", "start_seconds": 0, "end_seconds": 30}],
+        }
+
+        # Mock the args namespace that cmd_batch expects
+        class FakeArgs:
+            dir = str(tmp_path)
+            max_duration = 15
+            resume = False
+
+        with patch("video_splitter.cli.SplitConfig") as MockConfig:
+            MockConfig.from_env.return_value = MagicMock()
+            with patch("video_splitter.cli.Pipeline") as MockPipeline:
+                MockPipeline.return_value = fake_pipeline
+
+                # Redirect stdout to capture output
+                import io
+                import sys as _sys
+                captured = io.StringIO()
+                _original_stdout = _sys.stdout
+                try:
+                    _sys.stdout = captured
+                    cmd_batch(FakeArgs())
+                finally:
+                    _sys.stdout = _original_stdout
+
+                output = captured.getvalue()
+
+        # Verify pipeline was called for each video
+        assert fake_pipeline.run.called
+        # Verify summary output
+        assert "Batch Complete" in output
+        assert "Total:" in output
+        assert "OK:" in output
+        assert "Failed:" in output
+
+    def test_batch_cmd_handles_pipeline_error(self, tmp_path):
+        """cmd_batch should catch pipeline errors and continue with summary."""
+        from unittest.mock import patch, MagicMock
+
+        from video_splitter.cli import cmd_batch
+
+        # Create dummy video file
+        video = str(tmp_path / "error_video.mp4")
+        with open(video, "wb") as f:
+            f.write(b"\x00" * 100)
+
+        fake_pipeline = MagicMock()
+        fake_pipeline.run.side_effect = RuntimeError("Transcription failed")
+
+        class FakeArgs:
+            dir = str(tmp_path)
+            max_duration = 15
+            resume = False
+
+        with patch("video_splitter.cli.SplitConfig") as MockConfig:
+            MockConfig.from_env.return_value = MagicMock()
+            with patch("video_splitter.cli.Pipeline") as MockPipeline:
+                MockPipeline.return_value = fake_pipeline
+
+                import io
+                import sys as _sys
+                captured = io.StringIO()
+                _original_stdout = _sys.stdout
+                try:
+                    _sys.stdout = captured
+                    cmd_batch(FakeArgs())
+                finally:
+                    _sys.stdout = _original_stdout
+
+                output = captured.getvalue()
+
+        assert fake_pipeline.run.called
+        assert "Batch Complete" in output
+        assert "Failed:" in output
+        assert "Total:" in output

@@ -4,10 +4,26 @@ Unit tests for FFmpeg Skill.
 These tests require FFmpeg to be installed and available in the system PATH.
 """
 
-import pytest
+import importlib.util
 import os
+import sys
 import tempfile
-from ffmpeg_skill import FFmpegSkill, FFmpegError
+
+import pytest
+
+# ffmpeg-skill directory uses a hyphen, which is invalid for Python imports.
+# Load the module via importlib to work around this.
+_SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
+_SPEC = importlib.util.spec_from_file_location(
+    "ffmpeg_skill", os.path.join(_SKILL_DIR, "__init__.py")
+)
+assert _SPEC is not None, f"Could not find ffmpeg-skill/__init__.py"
+assert _SPEC.loader is not None, f"Loader not found for ffmpeg-skill/__init__.py"
+_ffmpeg_skill = importlib.util.module_from_spec(_SPEC)
+sys.modules["ffmpeg_skill"] = _ffmpeg_skill
+_SPEC.loader.exec_module(_ffmpeg_skill)
+FFmpegSkill = _ffmpeg_skill.FFmpegSkill
+FFmpegError = _ffmpeg_skill.FFmpegError
 
 
 @pytest.fixture
