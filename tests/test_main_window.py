@@ -47,6 +47,154 @@ def _make_chapters(n=2):
 
 # ── MainWindow construction ──────────────────────────────────────────────
 
+# ── TC-14: Error handling precondition checks (QMessageBox dialogs) ─────────
+
+class TestErrorHandlingDialogs:
+    """Verify TC-14: QMessageBox dialogs appear for precondition violations."""
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_detect_chapters_without_video_shows_warning(self, mock_hc, qapp):
+        """TC-14: Detect Chapters without video → QMessageBox.warning."""
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._current_video_path = ""
+        win._controller.get_transcript = MagicMock(
+            return_value={"segments": [], "duration": 0}
+        )
+        with patch("gui.app.QMessageBox") as MockMsg:
+            win._on_detect_chapters()
+            MockMsg.warning.assert_called_once()
+            # QMessageBox.warning(parent, title, message) — title is args[1]
+            args = MockMsg.warning.call_args[0]
+            assert "No Transcript" in args[1]
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_start_split_without_video_shows_warning(self, mock_hc, qapp):
+        """TC-14: Start Split without video → QMessageBox.warning."""
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._current_video_path = ""
+        with patch("gui.app.QMessageBox") as MockMsg:
+            win._on_start_split("/tmp/out")
+            MockMsg.warning.assert_called_once()
+            args = MockMsg.warning.call_args[0]
+            assert "No Video" in args[1]
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_burn_subtitles_without_split_shows_warning(self, mock_hc, qapp):
+        """TC-14: Burn Subtitles without split → QMessageBox.warning."""
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._split_output_files = []
+        with patch("gui.app.QMessageBox") as MockMsg:
+            win._on_burn_subtitles()
+            MockMsg.warning.assert_called_once()
+            args = MockMsg.warning.call_args[0]
+            assert "No Segments" in args[1]
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_burn_subtitles_without_transcript_shows_warning(self, mock_hc, qapp):
+        """TC-14: Burn Subtitles with split files but no transcript → QMessageBox.warning."""
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._split_output_files = ["seg1.mp4"]
+        win._controller.get_transcript = MagicMock(
+            return_value={"segments": [], "duration": 0}
+        )
+        with patch("gui.app.QMessageBox") as MockMsg:
+            win._on_burn_subtitles()
+            MockMsg.warning.assert_called_once()
+            args = MockMsg.warning.call_args[0]
+            assert "No Transcript" in args[1]
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_start_transcription_without_video_shows_warning(self, mock_hc, qapp):
+        """TC-14: Start Transcription without video → QMessageBox.warning."""
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._current_video_path = ""
+        with patch("gui.app.QMessageBox") as MockMsg:
+            win._on_start_transcription()
+            MockMsg.warning.assert_called_once()
+            args = MockMsg.warning.call_args[0]
+            assert "No Video" in args[1]
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_start_transcription_already_running_shows_info(self, mock_hc, qapp):
+        """TC-14: Start Transcription while already running → QMessageBox.information."""
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._current_video_path = "/fake/video.mp4"
+        win._streaming_worker = MagicMock()  # simulate running
+        with patch("gui.app.QMessageBox") as MockMsg:
+            win._on_start_transcription()
+            MockMsg.information.assert_called_once()
+            args = MockMsg.information.call_args[0]
+            assert "Already Running" in args[1]
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_start_split_without_chapters_shows_warning(self, mock_hc, qapp):
+        """TC-14: Start Split with video but no chapters → QMessageBox.warning."""
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._current_video_path = "/fake/video.mp4"
+        win._split_controller._chapters = []
+        with patch("gui.app.QMessageBox") as MockMsg:
+            win._on_start_split("/tmp/out")
+            MockMsg.warning.assert_called_once()
+            args = MockMsg.warning.call_args[0]
+            assert "No Chapters" in args[1]
+
+
+# ── TC-10: Export Chapters via GUI ───────────────────────────────────────
+
+class TestExportChaptersGUI:
+    """Verify TC-10: File → Export Chapters dialog and file output."""
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_export_chapters_success_updates_status(self, mock_hc, qapp, tmp_path):
+        """Successful export should update status bar with file path."""
+        from gui.app import MainWindow
+        win = MainWindow()
+        export_path = str(tmp_path / "chapters.json")
+        win._split_controller.export_chapters = MagicMock(
+            return_value=export_path
+        )
+        win._on_export_chapters()
+        assert export_path in win._status_bar_widget._label.text()
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_export_chapters_error_shows_warning(self, mock_hc, qapp):
+        """Export failure (e.g. no chapters) should show QMessageBox.warning."""
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._split_controller.export_chapters = MagicMock(
+            side_effect=ValueError("No chapters to export")
+        )
+        with patch("gui.app.QMessageBox") as MockMsg:
+            win._on_export_chapters()
+            MockMsg.warning.assert_called_once()
+            # QMessageBox.warning(parent, title, message) — title is args[1], message is args[2]
+            args = MockMsg.warning.call_args[0]
+            assert "Export Error" in args[1]
+            assert "No chapters to export" in args[2]
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_export_chapters_error_no_video(self, mock_hc, qapp):
+        """Export failure due to missing video path should show warning."""
+        from gui.app import MainWindow
+        win = MainWindow()
+        win._split_controller.export_chapters = MagicMock(
+            side_effect=ValueError("No video path set")
+        )
+        with patch("gui.app.QMessageBox") as MockMsg:
+            win._on_export_chapters()
+            MockMsg.warning.assert_called_once()
+            args = MockMsg.warning.call_args[0]
+            assert "Export Error" in args[1]
+            assert "No video path set" in args[2]
+
+
 class TestMainWindowInit:
     @patch("gui.app.MainWindow._start_health_check")
     def test_init_creates_controllers(self, mock_hc, qapp):

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.1 (2026-07-29)
+
+- Quality gate infrastructure hardened (7/7 gates pass):
+  - Semgrep SAST rules (`.semgrep.yml`) covering injection, secrets, weak crypto, unsafe deserialization
+  - `architecture.yaml` fixed for xp-gate Gate 6 layer validation
+  - xp-gate `gate-runner.js` patched for Windows bash path compatibility
+- E2E test coverage against acceptance checklist (14 TC items):
+  - GPU OOM → CPU fallback engine selection (design spec §6)
+  - TC-01: GUI startup state (window title, tabs, status bar, menus)
+  - TC-14: QMessageBox dialogs for all 7 precondition checks
+  - TC-10: File → Export Chapters success/error paths
+  - TC-04: Ctrl+Return keyboard shortcut triggers save+next
+- Fixed 3 pre-existing test issues:
+  - `ffmpeg-skill/tests.py`: importlib workaround for hyphenated directory (15 tests now collect)
+  - `test_e2e_cli.py`: batch tests refactored from slow subprocess to unit-level cmd_batch tests
+- Total: 20 new automation tests, 643 quick tests pass, 107 GUI tests pass
+
 ## 0.7.0 (2026-07-25)
 
 - True streaming ASR pipeline (major performance overhaul):

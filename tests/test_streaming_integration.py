@@ -206,3 +206,25 @@ class TestStreamingWorkerWithMainWindow:
 
             assert win._controller._duration == 120.0
             mock_set_dur.assert_called_once_with(120.0)
+
+    @patch("gui.app.MainWindow._start_health_check")
+    def test_ctrl_return_triggers_save_next(self, mock_hc, qapp, mock_video):
+        """TC-04: Ctrl+Return shortcut must trigger _on_save_next via QAction."""
+        from gui.app import MainWindow
+        from PySide6.QtGui import QKeySequence
+
+        win = MainWindow()
+        win._current_video_path = mock_video
+
+        with patch.object(win, "_on_save_next") as mock_handler:
+            # Find the Ctrl+Return QAction registered in _setup_shortcuts
+            for action in win.actions():
+                shortcut = action.shortcut()
+                if shortcut == QKeySequence("Ctrl+Return"):
+                    action.trigger()
+                    mock_handler.assert_called_once()
+                    return
+
+            # If we didn't find it via actions(), try triggering directly
+            # via keyboard shortcut simulation
+            pytest.fail("Ctrl+Return QAction not found in MainWindow actions")
